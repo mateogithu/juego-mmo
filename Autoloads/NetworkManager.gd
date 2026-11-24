@@ -648,6 +648,37 @@ func request_market_buy(listing_id: int) -> void:
 	_rpc_market_buy.rpc_id(1, listing_id)
 
 
+func request_merchant_buy(stock_index: int) -> void:
+	_rpc_merchant_buy.rpc_id(1, stock_index)
+
+
+@rpc("any_peer", "call_local", "reliable")
+func _rpc_merchant_buy(stock_index: int) -> void:
+	if not is_server_running():
+		return
+	if stock_index < 0 or stock_index >= GameConfig.MERCHANT_STOCK.size():
+		return
+	var sender_id: int = _get_sender_id()
+	var key: String = get_peer_username_key(sender_id)
+	var buyer: Dictionary = DatabaseManager.get_account_mutable(key)
+	if buyer.is_empty():
+		return
+	var offer: Dictionary = GameConfig.MERCHANT_STOCK[stock_index]
+	var price: int = int(offer["price_gold"])
+	if int(buyer.get("gold", 0)) < price:
+		_rpc_receive_chat.rpc_id(sender_id, "Tienda", "Sistema", "Oro insuficiente para esta compra.", "#ff8888")
+		return
+	buyer["gold"] = int(buyer.get("gold", 0)) - price
+	var iid: String = str(offer["item_id"])
+	var qty: int = int(offer["qty"])
+	DatabaseManager.add_item(key, iid, qty)
+	DatabaseManager.mark_dirty()
+	DatabaseManager.save_database()
+	push_profile_to_peer(sender_id)
+	var iname: String = str((GameConfig.ITEMS.get(iid, {}) as Dictionary).get("name", iid))
+	_rpc_receive_chat.rpc_id(sender_id, "Tienda", "Sistema", "Compraste %s x%d por %d oro." % [iname, qty, price], "#88f2a2")
+
+
 @rpc("any_peer", "call_local", "reliable")
 func _rpc_market_buy(listing_id: int) -> void:
 	if not is_server_running():

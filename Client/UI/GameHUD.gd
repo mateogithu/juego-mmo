@@ -17,9 +17,14 @@ var _banner_timer: float = 0.0
 # Core HUD widgets
 @onready var root_control: Control = $RootControl
 var _grace_label: Label = null
+var _boss_bar_box: PanelContainer = null
+var _boss_name_lbl: Label = null
+var _boss_hp_bar: ProgressBar = null
+var _boss_hp_lbl: Label = null
 var _banner_box: PanelContainer = null
 var _banner_title: Label = null
 var _banner_body: Label = null
+var _station_filter: String = ""
 
 var _player_title: Label = null
 var _hp_bar: ProgressBar = null
@@ -209,6 +214,11 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func open_trade_market() -> void:
+	open_station_panel("shop_stall")
+
+
+func open_station_panel(station_type: String) -> void:
+	_station_filter = station_type
 	if _inv_panel != null:
 		_close_all_panels()
 		_toggle_panel(_inv_panel)
@@ -273,7 +283,31 @@ func _process(delta: float) -> void:
 			_banner_box.visible = false
 
 	_update_combat_grace_banner()
+	_update_boss_bar_ui()
 	_update_player_vitals_ui()
+
+
+func _update_boss_bar_ui() -> void:
+	if _boss_bar_box == null or local_player == null:
+		return
+	var best_boss: WorldBoss = null
+	var best_dist: float = 65.0
+	for node: Node in get_tree().get_nodes_in_group("world_bosses"):
+		var wb: WorldBoss = node as WorldBoss
+		if not wb.is_alive:
+			continue
+		var d: float = local_player.global_position.distance_to(wb.global_position)
+		if d < best_dist:
+			best_dist = d
+			best_boss = wb
+	if best_boss == null:
+		_boss_bar_box.visible = false
+		return
+	_boss_bar_box.visible = true
+	_boss_name_lbl.text = "☠ %s — %s ☠" % [best_boss.boss_name, best_boss.boss_title]
+	_boss_hp_bar.max_value = best_boss.max_hp
+	_boss_hp_bar.value = best_boss.hp
+	_boss_hp_lbl.text = "%d / %d HP" % [int(ceilf(best_boss.hp)), int(best_boss.max_hp)]
 
 
 func _update_combat_grace_banner() -> void:
@@ -409,14 +443,34 @@ func _build_hud_layout() -> void:
 	_grace_label.text = "Gracia Combativa: sincronizando..."
 	top_bar.add_child(_grace_label)
 
+	# 1b. Live World Boss / Dungeon Boss Health Bar (visible within 65m of a Boss)
+	_boss_bar_box = PanelContainer.new()
+	_boss_bar_box.add_theme_stylebox_override("panel", _make_style(Color(0.14, 0.05, 0.05, 0.9), Color(0.95, 0.3, 0.22, 0.95)))
+	_boss_bar_box.anchor_left = 0.24
+	_boss_bar_box.anchor_right = 0.76
+	_boss_bar_box.anchor_top = 0.0
+	_boss_bar_box.offset_top = 56.0
+	_boss_bar_box.offset_bottom = 114.0
+	_boss_bar_box.visible = false
+	root_control.add_child(_boss_bar_box)
+	var boss_vb: VBoxContainer = VBoxContainer.new()
+	boss_vb.add_theme_constant_override("separation", 3)
+	_boss_bar_box.add_child(boss_vb)
+	_boss_name_lbl = Label.new()
+	_boss_name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_boss_name_lbl.add_theme_color_override("font_color", Color(1.0, 0.72, 0.42))
+	boss_vb.add_child(_boss_name_lbl)
+	_boss_hp_bar = _create_bar(boss_vb, Color(0.86, 0.16, 0.14))
+	_boss_hp_lbl = _attach_bar_label(_boss_hp_bar)
+
 	# 2. Dramatic Global Event Banner (hidden by default)
 	_banner_box = PanelContainer.new()
 	_banner_box.add_theme_stylebox_override("panel", _make_style(Color(0.14, 0.09, 0.04, 0.92), Color(1.0, 0.85, 0.32, 0.95)))
 	_banner_box.anchor_left = 0.22
 	_banner_box.anchor_right = 0.78
 	_banner_box.anchor_top = 0.0
-	_banner_box.offset_top = 60.0
-	_banner_box.offset_bottom = 132.0
+	_banner_box.offset_top = 120.0
+	_banner_box.offset_bottom = 192.0
 	_banner_box.visible = false
 	root_control.add_child(_banner_box)
 	var bvb: VBoxContainer = VBoxContainer.new()
@@ -977,12 +1031,19 @@ func _build_avatar_console_modal(style: StyleBoxFlat) -> void:
 	)
 	world_row.add_child(b_night)
 	var b_rep: Button = Button.new()
-	b_rep.text = "Reparar Estructura Cercana"
+	b_rep.text = "Reparar Estructura"
 	b_rep.pressed.connect(func() -> void:
 		if _world_auth != null:
 			_world_auth.request_avatar_world_command("repair_nearest", "")
 	)
 	world_row.add_child(b_rep)
+	var b_boss: Button = Button.new()
+	b_boss.text = "Reaparecer Jefes"
+	b_boss.pressed.connect(func() -> void:
+		if _world_auth != null:
+			_world_auth.request_avatar_world_command("respawn_bosses", "")
+	)
+	world_row.add_child(b_boss)
 	var b_kick: Button = Button.new()
 	b_kick.text = "Expulsar Objetivo"
 	b_kick.pressed.connect(func() -> void:
@@ -1071,17 +1132,37 @@ func _refresh_inventory_panel() -> void:
 	for rkey_var: Variant in GameConfig.CRAFT_RECIPES.keys():
 		var rkey: String = str(rkey_var)
 		var rec: Dictionary = GameConfig.CRAFT_RECIPES[rkey] as Dictionary
+		var st_tag: String = str(rec.get("station", "forge"))
 		var idef: Dictionary = GameConfig.ITEMS[rkey] as Dictionary
 		var cost_parts: Array[String] = []
 		var cost: Dictionary = rec["cost"] as Dictionary
 		for ckey_var: Variant in cost.keys():
 			cost_parts.append("%s:%d" % [str((GameConfig.ITEMS[str(ckey_var)] as Dictionary)["name"]), int(cost[ckey_var])])
+		var prefix: String = "[Alq] " if st_tag == "alchemy" else "[Forja] "
 		var btn: Button = Button.new()
-		btn.text = "Fabricar %s (%s)" % [str(idef["name"]), ", ".join(cost_parts)]
+		btn.text = "%s%s (%s)" % [prefix, str(idef["name"]), ", ".join(cost_parts)]
 		btn.pressed.connect(func() -> void: NetworkManager.request_craft(rkey))
 		_craft_list_box.add_child(btn)
 
 	_clear_box(_market_list_box)
+	var merch_hdr: Label = Label.new()
+	merch_hdr.text = "— Tienda del Asentamiento (Oro) —"
+	merch_hdr.add_theme_color_override("font_color", Color(1.0, 0.86, 0.42))
+	_market_list_box.add_child(merch_hdr)
+	for m_idx: int in range(GameConfig.MERCHANT_STOCK.size()):
+		var offer: Dictionary = GameConfig.MERCHANT_STOCK[m_idx]
+		var iid: String = str(offer["item_id"])
+		var iname: String = str((GameConfig.ITEMS.get(iid, {}) as Dictionary).get("name", iid))
+		var mbtn: Button = Button.new()
+		mbtn.text = "Comprar %s x%d (%d oro)" % [iname, int(offer["qty"]), int(offer["price_gold"])]
+		var captured_idx: int = m_idx
+		mbtn.pressed.connect(func() -> void: NetworkManager.request_merchant_buy(captured_idx))
+		_market_list_box.add_child(mbtn)
+
+	var p_hdr: Label = Label.new()
+	p_hdr.text = "— Mercado de Jugadores —"
+	p_hdr.add_theme_color_override("font_color", Color(0.72, 0.9, 1.0))
+	_market_list_box.add_child(p_hdr)
 	for entry_var: Variant in NetworkManager.cached_listings:
 		var entry: Dictionary = entry_var as Dictionary
 		var lid: int = int(entry.get("id", -1))

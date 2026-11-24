@@ -9,9 +9,13 @@ extends Node3D
 
 const WATER_SHADER: Shader = preload("res://Client/Shaders/water.gdshader")
 const RESOURCE_SCENE: PackedScene = preload("res://Client/Entities/ResourceNode.tscn")
+const STATION_SCENE: PackedScene = preload("res://Client/Entities/WorldStation.tscn")
 
 @onready var terrain_chunks_root: Node3D = $TerrainChunks
 @onready var landmarks_root: Node3D = $Landmarks
+@onready var stations_root: Node3D = $Stations
+@onready var dungeons_root: Node3D = $Dungeons
+@onready var bosses_root: Node3D = $Bosses
 @onready var water_plane: MeshInstance3D = $WaterPlane
 @onready var players_root: Node3D = $Players
 @onready var dragons_root: Node3D = $Dragons
@@ -42,6 +46,8 @@ func _ready() -> void:
 	TerrainChunk.update_shader_origin_offset(Vector3.ZERO)
 	_setup_water_plane()
 	_build_primordial_landmarks()
+	_spawn_settlement_stations()
+	DungeonGenerator.build_all_dungeons(dungeons_root)
 	if world_auth != null:
 		world_auth.local_player_ready.connect(_on_local_player_ready)
 		world_auth.world_time_updated.connect(_on_world_time_updated)
@@ -51,6 +57,25 @@ func _ready() -> void:
 		if not NetworkManager.is_dedicated_server() and world_auth.player_nodes.has(my_id):
 			_local_player = world_auth.player_nodes[my_id] as PlayerController
 	_update_chunk_streaming(Vector3.ZERO, GameConfig.GROUND_CHUNK_RADIUS, true)
+
+
+func _spawn_settlement_stations() -> void:
+	if stations_root == null:
+		return
+	for child: Node in stations_root.get_children():
+		child.queue_free()
+	var station_defs: Array = [
+		["forge", "Yunque y Forja de Herrería", Vector2(-14.0, 9.0)],
+		["alchemy", "Banco de Alquimia", Vector2(14.0, 9.0)],
+		["shop_stall", "Tienda y Mercado del Valle", Vector2(0.0, -15.0)]
+	]
+	for s_var: Variant in station_defs:
+		var sdef: Array = s_var as Array
+		var xz: Vector2 = sdef[2] as Vector2
+		var wy: float = GameConfig.sample_terrain_height(xz.x, xz.y)
+		var st_node: WorldStation = STATION_SCENE.instantiate() as WorldStation
+		stations_root.add_child(st_node)
+		st_node.setup(str(sdef[0]), str(sdef[1]), Vector3(xz.x, wy, xz.y))
 
 
 func _on_local_player_ready(pc: PlayerController) -> void:
@@ -82,6 +107,8 @@ func _rebuild_all_chunks() -> void:
 	for child: Node in landmarks_root.get_children():
 		child.queue_free()
 	_build_primordial_landmarks()
+	_spawn_settlement_stations()
+	DungeonGenerator.build_all_dungeons(dungeons_root)
 	var focus_world: Vector3 = GameConfig.local_to_world(_local_player.global_position) if (_local_player != null and is_instance_valid(_local_player)) else Vector3.ZERO
 	_update_chunk_streaming(focus_world, GameConfig.GROUND_CHUNK_RADIUS, true)
 
@@ -96,7 +123,6 @@ func _process(delta: float) -> void:
 	var high_flight: bool = false
 	if _local_player != null and is_instance_valid(_local_player):
 		focus_local = _local_player.global_position
-		# Floating Origin rebase when player travels > 2,000 meters from local origin
 		if Vector2(focus_local.x, focus_local.z).length() > GameConfig.FLOATING_ORIGIN_THRESHOLD:
 			_perform_floating_origin_shift(focus_local)
 			focus_local = _local_player.global_position
@@ -106,7 +132,6 @@ func _process(delta: float) -> void:
 		var altitude: float = focus_world_chk.y - ground_y
 		high_flight = _local_player.is_mounted and altitude >= GameConfig.FLIGHT_HIGH_ALTITUDE_THRESHOLD
 
-	# Keep infinite water plane smoothly centered on player XZ
 	if water_plane != null:
 		water_plane.position = Vector3(focus_local.x, GameConfig.WATER_LEVEL, focus_local.z)
 
@@ -118,7 +143,6 @@ func _process(delta: float) -> void:
 
 
 func _perform_floating_origin_shift(focus_local: Vector3) -> void:
-	# Snap shift to exact CHUNK_SIZE multiples to preserve zero-seam terrain alignment
 	var shift_x: float = snappedf(focus_local.x, GameConfig.CHUNK_SIZE)
 	var shift_z: float = snappedf(focus_local.z, GameConfig.CHUNK_SIZE)
 	var shift: Vector3 = Vector3(shift_x, 0.0, shift_z)
@@ -128,11 +152,18 @@ func _perform_floating_origin_shift(focus_local: Vector3) -> void:
 	GameConfig.world_origin_offset += shift
 	var delta_vec: Vector3 = -shift
 
-	for container: Node3D in [terrain_chunks_root, landmarks_root, buildings_root, projectiles_root, resources_root, loot_root]:
+	for container: Node3D in [terrain_chunks_root, landmarks_root, stations_root, dungeons_root, buildings_root, projectiles_root, resources_root, loot_root]:
 		if container == null:
 			continue
 		for child: Node in container.get_children():
 			if child is Node3D:
+				(child as Node3D).position += delta_vec
+
+	if bosses_root != null:
+		for child: Node in bosses_root.get_children():
+			if child is WorldBoss:
+				(child as WorldBoss).apply_floating_origin_shift(delta_vec)
+			elif child is Node3D:
 				(child as Node3D).position += delta_vec
 
 	if players_root != null:
@@ -152,8 +183,6 @@ func _perform_floating_origin_shift(focus_local: Vector3) -> void:
 	TerrainChunk.update_shader_origin_offset(GameConfig.world_origin_offset)
 	if _water_mat != null:
 		_water_mat.set_shader_parameter("world_origin_offset", GameConfig.world_origin_offset)
-
-	print("[InfiniteWorldManager] Floating Origin shifted by %s (total offset: %s)" % [str(shift), str(GameConfig.world_origin_offset)])
 
 
 func _update_chunk_streaming(focus_world: Vector3, radius: int, force: bool) -> void:

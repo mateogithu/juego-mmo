@@ -1,0 +1,26 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Client/Entities/DungeonEntrance.gd" id="1_dung"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_dung"]
+height = 4.2
+radius = 2.6
+
+[node name="DungeonEntrance" type="Area3D"]
+collision_layer = 32
+collision_mask = 0
+script = ExtResource("1_dung")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.1, 0)
+shape = SubResource("CylinderShape3D_dung")
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="Label3D" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.2, 0)
+billboard = 1
+modulate = Color(0.75, 0.92, 1, 1)
+text = "[E / Y] Mazmorra"
+font_size = 28
+outline_size = 8

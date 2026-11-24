@@ -209,27 +209,123 @@ const BUILD_PIECES: Dictionary = {
 
 # Items & Non-Cosmetic Craftable Equipment (Lootable on death)
 const ITEMS: Dictionary = {
-	"wood": {"name": "Madera", "type": "resource", "stackable": true, "value": 3},
-	"stone": {"name": "Piedra", "type": "resource", "stackable": true, "value": 4},
-	"arcane_ore": {"name": "Mineral Arcano", "type": "resource", "stackable": true, "value": 12},
-	"health_potion": {"name": "Poción de Vida", "type": "consumable", "heal": 60.0, "stackable": true, "value": 25},
-	"mana_potion": {"name": "Poción de Maná", "type": "consumable", "mana": 65.0, "stackable": true, "value": 25},
-	"siege_charge": {"name": "Carga de Asedio", "type": "consumable", "siege_damage": 180.0, "stackable": true, "value": 60},
-	"iron_blade": {"name": "Espada de Acero Forjado", "type": "weapon", "atk_bonus": 8.0, "stackable": false, "value": 80},
-	"arcane_greatsword": {"name": "Mandoble Arcano", "type": "weapon", "atk_bonus": 16.0, "spell_bonus": 8.0, "stackable": false, "value": 180},
-	"ember_staff": {"name": "Báculo de Brasas", "type": "weapon", "spell_bonus": 18.0, "stackable": false, "value": 170},
-	"knight_plate": {"name": "Coraza del Reino", "type": "armor", "def_bonus": 9.0, "hp_bonus": 35.0, "stackable": false, "value": 190}
+	"wood": {"name": "Madera Antigua", "type": "resource", "stackable": true, "value": 4},
+	"stone": {"name": "Piedra Tallada", "type": "resource", "stackable": true, "value": 4},
+	"iron_ore": {"name": "Mineral de Hierro", "type": "resource", "stackable": true, "value": 8},
+	"arcane_ore": {"name": "Cristal Arcano", "type": "resource", "stackable": true, "value": 14},
+	"alchemy_herb": {"name": "Hierba Alquímica", "type": "resource", "stackable": true, "value": 10},
+	"mythic_ingot": {"name": "Lingote Mítico", "type": "resource", "stackable": true, "value": 85},
+	"arcane_gem": {"name": "Gema Arcana Pura", "type": "resource", "stackable": true, "value": 95},
+	"boss_blueprint": {"name": "Plano de Armadura Mítica", "type": "resource", "stackable": true, "value": 180},
+	"health_potion": {"name": "Poción de Vida", "type": "consumable", "heal": 70.0, "stackable": true, "value": 25},
+	"mana_potion": {"name": "Poción de Maná", "type": "consumable", "mana": 75.0, "stackable": true, "value": 25},
+	"elixir_fury": {"name": "Elixir de Furia Arcana", "type": "consumable", "buff_mult": 1.25, "duration": 45.0, "stackable": true, "value": 65},
+	"siege_charge": {"name": "Carga de Asedio", "type": "consumable", "siege_damage": 200.0, "stackable": true, "value": 60},
+	"iron_blade": {"name": "Espada de Hierro Forjado", "type": "weapon", "atk_bonus": 9.0, "stackable": false, "value": 75},
+	"arcane_greatsword": {"name": "Mandoble Arcano", "type": "weapon", "atk_bonus": 17.0, "spell_bonus": 9.0, "stackable": false, "value": 190},
+	"ember_staff": {"name": "Báculo de Brasas", "type": "weapon", "spell_bonus": 19.0, "stackable": false, "value": 180},
+	"nightblade_daggers": {"name": "Dagas Umbrías", "type": "weapon", "atk_bonus": 20.0, "stackable": false, "value": 195},
+	"knight_plate": {"name": "Coraza de Hierro del Reino", "type": "armor", "def_bonus": 10.0, "hp_bonus": 40.0, "stackable": false, "value": 185},
+	"obsidian_plate": {"name": "Armadura Mítica de Obsidiana", "type": "armor", "def_bonus": 18.0, "hp_bonus": 85.0, "stackable": false, "value": 480},
+	"dragonfire_staff": {"name": "Báculo del Wyrm Ancestral", "type": "weapon", "spell_bonus": 32.0, "atk_bonus": 8.0, "stackable": false, "value": 490},
+	"seraphim_blade": {"name": "Hoja del Serafín", "type": "weapon", "atk_bonus": 30.0, "spell_bonus": 14.0, "stackable": false, "value": 510}
 }
 
 const CRAFT_RECIPES: Dictionary = {
-	"health_potion": {"output_qty": 2, "cost": {"wood": 3, "arcane_ore": 1}},
-	"mana_potion": {"output_qty": 2, "cost": {"arcane_ore": 2}},
-	"siege_charge": {"output_qty": 1, "cost": {"stone": 6, "arcane_ore": 4}},
-	"iron_blade": {"output_qty": 1, "cost": {"wood": 4, "stone": 8}},
-	"arcane_greatsword": {"output_qty": 1, "cost": {"stone": 12, "arcane_ore": 10}},
-	"ember_staff": {"output_qty": 1, "cost": {"wood": 10, "arcane_ore": 10}},
-	"knight_plate": {"output_qty": 1, "cost": {"stone": 16, "arcane_ore": 8}}
+	"health_potion": {"station": "alchemy", "output_qty": 2, "cost": {"alchemy_herb": 2, "wood": 2}},
+	"mana_potion": {"station": "alchemy", "output_qty": 2, "cost": {"alchemy_herb": 2, "arcane_ore": 1}},
+	"elixir_fury": {"station": "alchemy", "output_qty": 1, "cost": {"alchemy_herb": 4, "arcane_ore": 3}},
+	"siege_charge": {"station": "alchemy", "output_qty": 1, "cost": {"iron_ore": 4, "arcane_ore": 4}},
+	"iron_blade": {"station": "forge", "output_qty": 1, "cost": {"wood": 4, "iron_ore": 6}},
+	"arcane_greatsword": {"station": "forge", "output_qty": 1, "cost": {"iron_ore": 10, "arcane_ore": 8}},
+	"ember_staff": {"station": "forge", "output_qty": 1, "cost": {"wood": 10, "arcane_ore": 8}},
+	"nightblade_daggers": {"station": "forge", "output_qty": 1, "cost": {"iron_ore": 9, "arcane_ore": 6}},
+	"knight_plate": {"station": "forge", "output_qty": 1, "cost": {"iron_ore": 14, "stone": 8}},
+	"obsidian_plate": {"station": "forge", "output_qty": 1, "cost": {"boss_blueprint": 1, "mythic_ingot": 3, "iron_ore": 10}},
+	"dragonfire_staff": {"station": "forge", "output_qty": 1, "cost": {"boss_blueprint": 1, "arcane_gem": 3, "wood": 10}},
+	"seraphim_blade": {"station": "forge", "output_qty": 1, "cost": {"boss_blueprint": 1, "mythic_ingot": 2, "arcane_gem": 2}}
 }
+
+# Physical Settlement Merchant Stock (starter supplies & tools purchasable with Gold)
+const MERCHANT_STOCK: Array[Dictionary] = [
+	{"item_id": "health_potion", "qty": 1, "price_gold": 25},
+	{"item_id": "mana_potion", "qty": 1, "price_gold": 25},
+	{"item_id": "iron_blade", "qty": 1, "price_gold": 80},
+	{"item_id": "knight_plate", "qty": 1, "price_gold": 190},
+	{"item_id": "wood", "qty": 10, "price_gold": 35},
+	{"item_id": "iron_ore", "qty": 5, "price_gold": 45},
+	{"item_id": "alchemy_herb", "qty": 5, "price_gold": 45}
+]
+
+# Colossal Open-World Bosses (Server-authoritative, contested PvP epic loot)
+const WORLD_BOSSES: Array[Dictionary] = [
+	{
+		"id": "chaos_behemoth",
+		"name": "Behemot de Obsidiana del Caos",
+		"title": "Titán de la Llama Indómita",
+		"style": "behemoth",
+		"spawn_xz": Vector2(115.0, 92.0),
+		"max_hp": 1400.0,
+		"damage": 38.0,
+		"aoe_damage": 68.0,
+		"aoe_radius": 9.5,
+		"aggro_range": 42.0,
+		"respawn_sec": 300.0,
+		"gold_reward": 420
+	},
+	{
+		"id": "order_seraphim",
+		"name": "Coloso Serafín del Orden",
+		"title": "Guardián de la Piedra Eterna",
+		"style": "seraphim",
+		"spawn_xz": Vector2(-120.0, -88.0),
+		"max_hp": 1500.0,
+		"damage": 36.0,
+		"aoe_damage": 64.0,
+		"aoe_radius": 10.0,
+		"aggro_range": 42.0,
+		"respawn_sec": 300.0,
+		"gold_reward": 450
+	},
+	{
+		"id": "elder_wyrm",
+		"name": "Wyrm Ancestral de las Cumbres",
+		"title": "Soberano Primordial del Cielo",
+		"style": "wyrm",
+		"spawn_xz": Vector2(18.0, -165.0),
+		"max_hp": 1800.0,
+		"damage": 44.0,
+		"aoe_damage": 78.0,
+		"aoe_radius": 11.5,
+		"aggro_range": 50.0,
+		"respawn_sec": 360.0,
+		"gold_reward": 600
+	}
+]
+
+# Explorable Open-World Dungeons
+const DUNGEONS: Array[Dictionary] = [
+	{
+		"id": "catacombs_chaos",
+		"name": "Catacumbas del Caos",
+		"theme": "chaos",
+		"entrance_xz": Vector2(68.0, -56.0),
+		"arena_origin": Vector3(0.0, -140.0, 0.0),
+		"boss_name": "Señor de las Cenizas",
+		"boss_hp": 820.0,
+		"gold_reward": 260
+	},
+	{
+		"id": "crypt_order",
+		"name": "Cripta del Orden Antiguo",
+		"theme": "order",
+		"entrance_xz": Vector2(-72.0, 62.0),
+		"arena_origin": Vector3(260.0, -140.0, 0.0),
+		"boss_name": "Centinela Rúnico",
+		"boss_hp": 860.0,
+		"gold_reward": 280
+	}
+]
 
 # Zero Pay-to-Win Cosmetic Shop Catalog (0% combat stats impact)
 const COSMETIC_ARMORS: Dictionary = {
@@ -418,21 +514,20 @@ func sample_terrain_normal(x: float, z: float) -> Vector3:
 	return Vector3(h_l - h_r, 2.0 * eps, h_d - h_u).normalized()
 
 
-## Deterministically generates resource veins (wood, stone, arcane_ore) for ANY infinite chunk.
+## Deterministically generates resource veins (wood, iron_ore, arcane_ore, alchemy_herb, stone) for ANY infinite chunk.
 ## Server and Clients compute the exact same resource IDs and world positions from world_seed.
 func get_chunk_resources(coord: Vector2i) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	var h: int = (world_seed * 73856093) ^ (coord.x * 19349663) ^ (coord.y * 83492791)
 	rng.seed = h
-	var count: int = rng.randi_range(1, 2)
+	var count: int = rng.randi_range(2, 3)
 	var origin_x: float = float(coord.x) * CHUNK_SIZE
 	var origin_z: float = float(coord.y) * CHUNK_SIZE
 	for slot: int in range(count):
 		var wx: float = origin_x + rng.randf_range(6.0, CHUNK_SIZE - 6.0)
 		var wz: float = origin_z + rng.randf_range(6.0, CHUNK_SIZE - 6.0)
-		# Keep immediate center sanctuary clear
-		if absf(wx) < 16.0 and absf(wz) < 16.0:
+		if absf(wx) < 26.0 and absf(wz) < 26.0:
 			continue
 		var wy: float = sample_terrain_height(wx, wz)
 		if wy < WATER_LEVEL + 0.5:
@@ -440,10 +535,16 @@ func get_chunk_resources(coord: Vector2i) -> Array[Dictionary]:
 		var roll: float = rng.randf()
 		var rtype: String = "wood"
 		if wy > 16.0:
-			rtype = "arcane_ore" if roll < 0.6 else "stone"
-		elif roll < 0.38:
+			rtype = "arcane_ore" if roll < 0.5 else "iron_ore"
+		elif roll < 0.25:
+			rtype = "wood"
+		elif roll < 0.5:
+			rtype = "iron_ore"
+		elif roll < 0.72:
+			rtype = "alchemy_herb"
+		elif roll < 0.88:
 			rtype = "stone"
-		elif roll < 0.58:
+		else:
 			rtype = "arcane_ore"
 		out.append({
 			"key": "%d,%d:%d" % [coord.x, coord.y, slot],

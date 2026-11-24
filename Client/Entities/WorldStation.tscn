@@ -1,0 +1,26 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Client/Entities/WorldStation.gd" id="1_ws"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_ws"]
+height = 2.4
+radius = 1.65
+
+[node name="WorldStation" type="StaticBody3D"]
+collision_layer = 33
+collision_mask = 0
+script = ExtResource("1_ws")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+shape = SubResource("CylinderShape3D_ws")
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="Label3D" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.8, 0)
+billboard = 1
+modulate = Color(1, 0.9, 0.52, 1)
+text = "[E / Y] Estación"
+font_size = 26
+outline_size = 6

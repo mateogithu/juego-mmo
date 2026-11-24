@@ -385,6 +385,8 @@ func _process_local_controls(delta: float) -> void:
 
 
 func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
+	# Ensure player root stays upright (zero leftover flight pitch/roll/yaw)
+	rotation = Vector3.ZERO
 	if camera_pivot != null:
 		camera_pivot.rotation = Vector3(_camera_pitch, _camera_yaw, 0.0)
 
@@ -397,23 +399,38 @@ func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
 	if is_divine_form:
 		base_speed *= 1.4
 
-	var input_vec: Vector2 = Vector2.ZERO if ui_captured else Input.get_vector("move_left", "move_right", "move_forward", "move_back")
-	var cam_basis: Basis = Basis(Vector3.UP, _camera_yaw)
-	var move_dir: Vector3 = (cam_basis * Vector3(input_vec.x, 0.0, input_vec.y))
+	# Project active camera forward (-Z) & right (+X) onto XZ plane (y = 0, normalized)
+	var cam_fwd: Vector3 = -player_camera.global_transform.basis.z if player_camera != null else Vector3(-sin(_camera_yaw), 0.0, -cos(_camera_yaw))
+	cam_fwd.y = 0.0
+	if cam_fwd.length_squared() > 0.0001:
+		cam_fwd = cam_fwd.normalized()
+	else:
+		cam_fwd = Vector3(-sin(_camera_yaw), 0.0, -cos(_camera_yaw))
+
+	var cam_right: Vector3 = player_camera.global_transform.basis.x if player_camera != null else Vector3(cos(_camera_yaw), 0.0, -sin(_camera_yaw))
+	cam_right.y = 0.0
+	if cam_right.length_squared() > 0.0001:
+		cam_right = cam_right.normalized()
+	else:
+		cam_right = Vector3(cos(_camera_yaw), 0.0, -sin(_camera_yaw))
+
+	var fwd_axis: float = 0.0 if ui_captured else Input.get_axis("move_back", "move_forward")
+	var right_axis: float = 0.0 if ui_captured else Input.get_axis("move_left", "move_right")
+	var move_dir: Vector3 = cam_fwd * fwd_axis + cam_right * right_axis
 	if move_dir.length() > 1.0:
 		move_dir = move_dir.normalized()
 
 	# L3 click toggles sprint on gamepad; Shift holds sprint on keyboard
 	if (not ui_captured) and Input.is_action_just_pressed("sprint") and Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_STICK):
 		_sprint_toggled = not _sprint_toggled
-	if input_vec.length() < 0.15:
+	if move_dir.length() < 0.15:
 		_sprint_toggled = false
 
 	# Dodge Roll with temporary iframes (Q / Alt / B-Circle)
 	if not ui_captured and Input.is_action_just_pressed("dodge") and not is_dodging and stamina >= 22.0:
 		is_dodging = true
 		_dodge_timer = 0.42
-		_dodge_dir = move_dir.normalized() if move_dir.length() > 0.1 else -Vector3(sin(_camera_yaw), 0.0, cos(_camera_yaw))
+		_dodge_dir = move_dir.normalized() if move_dir.length() > 0.1 else cam_fwd
 		AudioSynth.play_dodge()
 		var wa: Node = get_tree().get_first_node_in_group("world_authority")
 		if wa != null and wa.has_method("request_dodge"):
@@ -426,7 +443,6 @@ func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
 		if _dodge_timer <= 0.0:
 			is_dodging = false
 	else:
-		# LT/L2 or RMB: Hold = Directional Block; Quick Tap (<0.22s) = Cast Quick-Selected Class Ability!
 		var block_btn: bool = (not ui_captured) and Input.is_action_pressed("block_secondary") and (building_system == null or not building_system.is_active)
 		if block_btn:
 			_lt_hold_time += delta
@@ -456,6 +472,7 @@ func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
 		if is_first_person or is_blocking:
 			visual_root.rotation.y = lerp_angle(visual_root.rotation.y, _camera_yaw, clampf(delta * 18.0, 0.0, 1.0))
 		elif move_dir.length() > 0.08:
+			# Front of VisualRoot faces -Z; smoothly rotate toward XZ travel vector
 			var desired_yaw: float = atan2(-move_dir.x, -move_dir.z)
 			visual_root.rotation.y = lerp_angle(visual_root.rotation.y, desired_yaw, clampf(delta * 12.0, 0.0, 1.0))
 
@@ -466,12 +483,13 @@ func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
 
 	move_and_slide()
 	var wp: Vector3 = GameConfig.local_to_world(global_position)
-	var min_ground: float = GameConfig.sample_terrain_height(wp.x, wp.z)
-	if global_position.y < min_ground - 0.5:
-		global_position.y = min_ground + 0.15
-		velocity.y = maxf(0.0, velocity.y)
+	# Only clamp against surface terrain height when above underground dungeon altitude
+	if wp.y > -80.0:
+		var min_ground: float = GameConfig.sample_terrain_height(wp.x, wp.z)
+		if global_position.y < min_ground - 0.5:
+			global_position.y = min_ground + 0.15
+			velocity.y = maxf(0.0, velocity.y)
 
-	# Combat inputs (aimed straight at center Crosshair!)
 	if not ui_captured and (building_system == null or not building_system.is_active):
 		if Input.is_action_just_pressed("attack_primary") and _attack_cooldown <= 0.0 and not is_dodging:
 			_perform_primary_attack()
@@ -510,6 +528,16 @@ func _perform_primary_attack() -> void:
 	if wa != null and wa.has_method("request_primary_attack"):
 		var world_origin: Vector3 = GameConfig.local_to_world(global_position + Vector3(0.0, 1.35, 0.0))
 		wa.call("request_primary_attack", world_origin, aim_dir)
+	# Also allow physical harvesting by striking a nearby resource node!
+	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
+		var rn: ResourceNode = node as ResourceNode
+		if rn.is_depleted:
+			continue
+		var delta_v: Vector3 = rn.global_position - global_position
+		if delta_v.length() <= 4.4 and delta_v.normalized().dot(Vector3(aim_dir.x, 0.0, aim_dir.z).normalized()) > 0.35:
+			if wa != null and wa.has_method("request_gather_resource"):
+				wa.call("request_gather_resource", rn.resource_key)
+			break
 
 
 func _perform_ability(slot: int) -> void:
@@ -534,7 +562,8 @@ func _perform_ability(slot: int) -> void:
 		var dash_vec: Vector3 = Vector3(aim_dir.x, 0.0, aim_dir.z).normalized() * float(ab.get("dash_dist", 9.0))
 		global_position += dash_vec * 0.65
 		var dwp: Vector3 = GameConfig.local_to_world(global_position)
-		global_position.y = maxf(global_position.y, GameConfig.sample_terrain_height(dwp.x, dwp.z) + 0.2)
+		if dwp.y > -80.0:
+			global_position.y = maxf(global_position.y, GameConfig.sample_terrain_height(dwp.x, dwp.z) + 0.2)
 	else:
 		AudioSynth.play_fireball()
 	var wa: Node = get_tree().get_first_node_in_group("world_authority")
@@ -552,6 +581,7 @@ func _request_toggle_dragon() -> void:
 
 
 func _try_interact() -> void:
+	# 1. Loot chests (PvP or World Boss drops)
 	var best_dist: float = 5.5
 	var nearest_loot: LootCorpse = null
 	for node: Node in get_tree().get_nodes_in_group("loot_corpses"):
@@ -567,6 +597,38 @@ func _try_interact() -> void:
 			AudioSynth.play_ui_click()
 		return
 
+	# 2. Dungeon Entrances / Exits
+	best_dist = 6.0
+	var nearest_dungeon: DungeonEntrance = null
+	for node: Node in get_tree().get_nodes_in_group("dungeon_portals"):
+		var de: DungeonEntrance = node as DungeonEntrance
+		var d: float = global_position.distance_to(de.global_position)
+		if d < best_dist:
+			best_dist = d
+			nearest_dungeon = de
+	if nearest_dungeon != null:
+		var wa_d: Node = get_tree().get_first_node_in_group("world_authority")
+		if wa_d != null and wa_d.has_method("request_use_dungeon_portal"):
+			wa_d.call("request_use_dungeon_portal", nearest_dungeon.dungeon_id, nearest_dungeon.is_exit_portal)
+			AudioSynth.play_heal()
+		return
+
+	# 3. Physical Settlement Stations (Blacksmith Forge, Alchemy Bench, Shop Stall)
+	best_dist = 5.8
+	var nearest_station: WorldStation = null
+	for node: Node in get_tree().get_nodes_in_group("world_stations"):
+		var ws: WorldStation = node as WorldStation
+		var d: float = global_position.distance_to(ws.global_position)
+		if d < best_dist:
+			best_dist = d
+			nearest_station = ws
+	if nearest_station != null:
+		var hud: Node = get_tree().get_first_node_in_group("game_hud")
+		if hud != null and hud.has_method("open_station_panel"):
+			hud.call("open_station_panel", nearest_station.station_type)
+		return
+
+	# 4. Player-built gates & trade posts
 	best_dist = 5.5
 	var nearest_build: BuildPiece = null
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
@@ -583,11 +645,12 @@ func _try_interact() -> void:
 				ba.call("request_toggle_gate", nearest_build.building_id)
 				AudioSynth.play_build_place()
 		elif nearest_build.piece_type == "trade_post":
-			var hud: Node = get_tree().get_first_node_in_group("game_hud")
-			if hud != null and hud.has_method("open_trade_market"):
-				hud.call("open_trade_market")
+			var hud_m: Node = get_tree().get_first_node_in_group("game_hud")
+			if hud_m != null and hud_m.has_method("open_trade_market"):
+				hud_m.call("open_trade_market")
 		return
 
+	# 5. Gatherable Resource Nodes
 	best_dist = 5.8
 	var nearest_res: ResourceNode = null
 	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
@@ -647,13 +710,27 @@ func _process_remote_interpolation(delta: float) -> void:
 		global_position = mounted_dragon.rider_seat.global_position
 		visual_root.rotation.y = mounted_dragon.rotation.y
 	else:
+		rotation = Vector3.ZERO
 		global_position = global_position.lerp(_net_pos, clampf(delta * 14.0, 0.0, 1.0))
 		visual_root.rotation.y = lerp_angle(visual_root.rotation.y, _net_yaw, clampf(delta * 14.0, 0.0, 1.0))
 
 
 func set_mounted_dragon(dragon: DragonController) -> void:
+	var prev_dragon: DragonController = mounted_dragon
 	mounted_dragon = dragon
 	is_mounted = dragon != null
+	if not is_mounted and prev_dragon != null:
+		# Dismount orientation fix: inherit dragon yaw on camera pivot & face player forward (-Z)
+		var exit_yaw: float = prev_dragon.yaw_angle if is_local else prev_dragon.rotation.y
+		rotation = Vector3.ZERO
+		_camera_yaw = exit_yaw
+		_camera_pitch = -0.15
+		if visual_root != null:
+			visual_root.rotation = Vector3(0.0, exit_yaw, 0.0)
+		if camera_pivot != null:
+			camera_pivot.rotation = Vector3(_camera_pitch, _camera_yaw, 0.0)
+		global_position = prev_dragon.global_position + Vector3(0.0, 1.2, 0.0)
+		velocity = Vector3.ZERO
 	if is_local and player_camera != null:
 		player_camera.current = not is_mounted
 	_apply_status_visuals()

@@ -427,4 +427,8 @@ func _animate_dragon(delta: float) -> void:
 		tail_1.rotation_degrees.y = sin(_wing_phase * 0.6) * 14.0
 		tail_2.rotation_degrees.y = sin(_wing_phase * 0.6 - 0.8) * 18.0
 	if neck != null:
-		neck.rotation_degrees.x = sin(_wing_phase * 0.5) * 4.0 + (8.0 if is_breathing_fire else 0.0)
+		neck.rotation_degrees.x = sin(_wing_phase * 0.5) * 4.0 + (6.0 if is_breathing_fire else 0.0)
+	var jaw: Node3D = _rig.get("jaw", null) as Node3D
+	if jaw != null:
+		var target_jaw_x: float = 34.0 if is_breathing_fire else 0.0
+		jaw.rotation_degrees.x = lerpf(jaw.rotation_degrees.x, target_jaw_x, clampf(delta * 12.0, 0.0, 1.0))

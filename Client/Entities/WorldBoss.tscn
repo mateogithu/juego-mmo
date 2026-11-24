@@ -1,0 +1,36 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://Client/Entities/WorldBoss.gd" id="1_boss"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_boss"]
+height = 5.4
+radius = 2.1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_ring"]
+top_radius = 1.0
+bottom_radius = 1.0
+height = 0.08
+radial_segments = 24
+
+[node name="WorldBoss" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 1
+script = ExtResource("1_boss")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.7, 0)
+shape = SubResource("CylinderShape3D_boss")
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="TelegraphRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.25, 0)
+mesh = SubResource("CylinderMesh_ring")
+
+[node name="Label3D" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 6.4, 0)
+billboard = 1
+modulate = Color(1, 0.42, 0.28, 1)
+text = "Jefe de Mundo"
+font_size = 30
+outline_size = 8
