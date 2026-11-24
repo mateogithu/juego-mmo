@@ -1,0 +1,36 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://Client/Entities/DragonWorldBoss.gd" id="1_dwb"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_dwb"]
+height = 7.5
+radius = 3.8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_ring"]
+top_radius = 1.0
+bottom_radius = 1.0
+height = 0.08
+radial_segments = 24
+
+[node name="DragonWorldBoss" type="CharacterBody3D"]
+collision_layer = 2
+collision_mask = 1
+script = ExtResource("1_dwb")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.8, 0)
+shape = SubResource("CylinderShape3D_dwb")
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="TelegraphRing" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+mesh = SubResource("CylinderMesh_ring")
+
+[node name="Label3D" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 9.2, 0)
+billboard = 1
+modulate = Color(1, 0.55, 0.2, 1)
+text = "Dragón Jefe Supremo"
+font_size = 34
+outline_size = 8

@@ -1,15 +1,16 @@
 class_name BuildingAuthority
 extends Node
 
-## Server-authoritative player building, siege damage, gate interaction,
-## and chunk-indexed delta streaming/persistence for the infinite procedural world.
+## Server-authoritative player building, siege damage, house doors, storage chests,
+## SafeZone protection, Territorial War tracking, and 30-day Season Reset cleanup.
 
 const BUILD_PIECE_SCENE: PackedScene = preload("res://Client/Entities/BuildPiece.tscn")
+const STORAGE_CHEST_SCENE: PackedScene = preload("res://Client/Entities/StorageChest.tscn")
 
 @export var buildings_container_path: NodePath = NodePath("../Buildings")
 
 var _buildings_container: Node3D = null
-var _building_nodes: Dictionary = {} # int building_id -> BuildPiece
+var _building_nodes: Dictionary = {} # int building_id -> Node3D (BuildPiece or StorageChest)
 var _building_records: Dictionary = {} # int building_id -> Dictionary
 var _chunk_building_ids: Dictionary = {} # String chunk_key -> Array[int]
 
@@ -127,7 +128,6 @@ func _apply_chunk_buildings(records: Array) -> void:
 
 
 func _client_prune_distant_buildings(center_chunk: Vector2i, keep_radius: int) -> void:
-	# Dedicated/Host server keeps authoritative nodes or recreates on demand; only prune pure clients
 	if NetworkManager.is_server_running():
 		return
 	var to_free: Array[int] = []
@@ -140,9 +140,9 @@ func _client_prune_distant_buildings(center_chunk: Vector2i, keep_radius: int) -
 		if maxi(absi(ccoord.x - center_chunk.x), absi(ccoord.y - center_chunk.y)) > keep_radius:
 			to_free.append(bid)
 	for bid: int in to_free:
-		var bp: BuildPiece = _building_nodes[bid] as BuildPiece
-		if is_instance_valid(bp):
-			bp.queue_free()
+		var node: Node3D = _building_nodes[bid] as Node3D
+		if is_instance_valid(node):
+			node.queue_free()
 		_building_nodes.erase(bid)
 
 
@@ -158,6 +158,11 @@ func _rpc_request_place_building(piece_type: String, world_pos: Vector3, rotatio
 	var key: String = NetworkManager.get_peer_username_key(sender_id)
 	var acc: Dictionary = DatabaseManager.get_account_mutable(key)
 	if acc.is_empty() or not GameConfig.BUILD_PIECES.has(piece_type):
+		return
+
+	# Block building inside Safe Zones (Santuario del Alba & Ciudadela del Caos)
+	if SafeZone.is_in_safe_zone(world_pos):
+		NetworkManager._rpc_receive_chat.rpc_id(sender_id, "Santuario", "Sistema", "Zona Segura indestructible: no se puede construir dentro del Santuario.", "#88f2a2")
 		return
 
 	var ground_y: float = GameConfig.sample_terrain_height(world_pos.x, world_pos.z)
@@ -182,6 +187,7 @@ func _rpc_request_place_building(piece_type: String, world_pos: Vector3, rotatio
 	var bid: int = DatabaseManager.allocate_building_id()
 	var max_hp: float = float(spec.get("max_hp", 400.0))
 	var ccoord: Vector2i = GameConfig.world_to_chunk(world_pos)
+	var faction: String = str(acc.get("philosophy", GameConfig.PHILOSOPHY_NEUTRAL))
 	var record: Dictionary = {
 		"id": bid,
 		"chunk_x": ccoord.x,
@@ -189,6 +195,7 @@ func _rpc_request_place_building(piece_type: String, world_pos: Vector3, rotatio
 		"piece_type": piece_type,
 		"owner": str(acc.get("username", "")),
 		"guild_id": str(acc.get("guild_id", "")),
+		"faction": faction,
 		"position": [world_pos.x, ground_y, world_pos.z],
 		"rotation_y": rotation_y,
 		"hp": max_hp,
@@ -198,6 +205,12 @@ func _rpc_request_place_building(piece_type: String, world_pos: Vector3, rotatio
 	DatabaseManager.add_building_record(record)
 	_index_record(record)
 	_rpc_spawn_building.rpc(record)
+
+	# Territorial War & Alignment progression: building cities favors Order
+	TerritoryWarSystem.record_structure_built(world_pos, piece_type, faction)
+	AlignmentSystem.apply_action(key, 8)
+	NetworkManager.broadcast_season_data()
+	NetworkManager.push_profile_to_peer(sender_id)
 
 	if piece_type == "altar_order" or piece_type == "altar_chaos":
 		var label: String = str(spec.get("name", piece_type))
@@ -223,10 +236,36 @@ func _spawn_local_building(record: Dictionary) -> void:
 	var bid: int = int(record.get("id", -1))
 	if _building_nodes.has(bid):
 		return
-	var piece: BuildPiece = BUILD_PIECE_SCENE.instantiate() as BuildPiece
-	_buildings_container.add_child(piece)
-	piece.setup_from_record(record)
-	_building_nodes[bid] = piece
+	var ptype: String = str(record.get("piece_type", "wall"))
+	if ptype == "storage_chest":
+		var chest: StorageChest = STORAGE_CHEST_SCENE.instantiate() as StorageChest
+		_buildings_container.add_child(chest)
+		chest.setup(bid, str(record.get("owner", "")), _record_world_pos(record), float(record.get("rotation_y", 0.0)))
+		_building_nodes[bid] = chest
+	else:
+		var piece: BuildPiece = BUILD_PIECE_SCENE.instantiate() as BuildPiece
+		_buildings_container.add_child(piece)
+		piece.setup_from_record(record)
+		_building_nodes[bid] = piece
+
+
+func server_can_access_chest(peer_id: int, building_id: int) -> Dictionary:
+	if not _building_records.has(building_id):
+		return {"ok": false, "error": "Cajón inexistente."}
+	var rec: Dictionary = _building_records[building_id] as Dictionary
+	if str(rec.get("piece_type", "")) != "storage_chest":
+		return {"ok": false, "error": "No es un cajón de guardado."}
+	var acc: Dictionary = DatabaseManager.get_account_mutable(NetworkManager.get_peer_username_key(peer_id))
+	if acc.is_empty():
+		return {"ok": false, "error": "Cuenta inválida."}
+	var uname: String = str(acc.get("username", ""))
+	var owner_name: String = str(rec.get("owner", ""))
+	var is_owner: bool = uname == owner_name
+	var same_guild: bool = not str(rec.get("guild_id", "")).is_empty() and str(acc.get("guild_id", "")) == str(rec.get("guild_id", ""))
+	var is_avatar: bool = GameConfig.is_avatar_role(str(acc.get("role", "")))
+	if not (is_owner or same_guild or is_avatar):
+		return {"ok": false, "error": "Este cajón está cerrado con llave por %s." % owner_name}
+	return {"ok": true, "owner": owner_name}
 
 
 func request_toggle_gate(building_id: int) -> void:
@@ -240,7 +279,8 @@ func _rpc_toggle_gate(building_id: int) -> void:
 	if not _building_records.has(building_id):
 		return
 	var rec: Dictionary = _building_records[building_id] as Dictionary
-	if str(rec.get("piece_type", "")) != "gate":
+	var ptype: String = str(rec.get("piece_type", ""))
+	if ptype != "gate" and ptype != "house_door":
 		return
 	var sender_id: int = _get_sender_id()
 	var acc: Dictionary = DatabaseManager.get_account_mutable(NetworkManager.get_peer_username_key(sender_id))
@@ -252,7 +292,7 @@ func _rpc_toggle_gate(building_id: int) -> void:
 	var is_avatar: bool = GameConfig.is_avatar_role(str(acc.get("role", "")))
 	var breached: bool = float(rec.get("hp", 100.0)) < float(rec.get("max_hp", 100.0)) * 0.25
 	if not (is_owner or same_guild or is_avatar or breached):
-		NetworkManager._rpc_receive_chat.rpc_id(sender_id, "Puerta", "Sistema", "Esta puerta pertenece a %s. Solo su reino puede abrirla (o derribala en asedio)." % str(rec.get("owner", "")), "#ffaa66")
+		NetworkManager._rpc_receive_chat.rpc_id(sender_id, "Puerta", "Sistema", "Esta puerta pertenece a %s. Solo su dueño o reino puede abrirla (o derribala en asedio)." % str(rec.get("owner", "")), "#ffaa66")
 		return
 	var new_open: bool = not bool(rec.get("is_open", false))
 	rec["is_open"] = new_open
@@ -264,7 +304,7 @@ func _rpc_toggle_gate(building_id: int) -> void:
 func _rpc_update_gate_state(building_id: int, open_state: bool) -> void:
 	if _building_records.has(building_id):
 		(_building_records[building_id] as Dictionary)["is_open"] = open_state
-	if _building_nodes.has(building_id):
+	if _building_nodes.has(building_id) and _building_nodes[building_id] is BuildPiece:
 		var bp: BuildPiece = _building_nodes[building_id] as BuildPiece
 		bp.set_gate_open(open_state)
 
@@ -273,18 +313,35 @@ func server_damage_building(building_id: int, damage: float, attacker_name: Stri
 	if not NetworkManager.is_server_running() or not _building_records.has(building_id):
 		return
 	var rec: Dictionary = _building_records[building_id] as Dictionary
+	var bpos: Vector3 = _record_world_pos(rec)
+	if SafeZone.is_in_safe_zone(bpos):
+		return
 	var new_hp: float = maxf(0.0, float(rec.get("hp", 100.0)) - damage)
 	rec["hp"] = new_hp
 	DatabaseManager.mark_dirty()
 	if new_hp <= 0.0:
-		var spec: Dictionary = GameConfig.BUILD_PIECES.get(str(rec.get("piece_type", "")), {}) as Dictionary
+		var ptype: String = str(rec.get("piece_type", ""))
+		var spec: Dictionary = GameConfig.BUILD_PIECES.get(ptype, {}) as Dictionary
 		var bname: String = str(spec.get("name", "Estructura"))
 		var owner_name: String = str(rec.get("owner", ""))
 		var ckey: String = _record_chunk_key(rec)
+		if ptype == "storage_chest":
+			var chest_loot: Dictionary = DatabaseManager.remove_chest_inventory(building_id)
+			var wa: Node = get_tree().get_first_node_in_group("world_authority")
+			if not chest_loot.is_empty() and wa != null and wa.has_method("server_spawn_world_loot_bag"):
+				wa.call("server_spawn_world_loot_bag", "Cajón saqueado (%s)" % owner_name, bpos, 0, chest_loot)
 		DatabaseManager.remove_building_record(building_id, ckey)
 		_unindex_record(building_id)
 		_rpc_destroy_building.rpc(building_id)
-		NetworkManager.broadcast_system_message("¡ASEDIO! %s destruyó %s de %s." % [attacker_name, bname, owner_name], "#ff6b4a")
+
+		# Territorial War & Alignment progression: destroying structures favors Chaos
+		var attacker_acc: Dictionary = DatabaseManager.get_account_mutable(attacker_name)
+		var atk_faction: String = str(attacker_acc.get("philosophy", GameConfig.PHILOSOPHY_CHAOS))
+		TerritoryWarSystem.record_structure_destroyed(bpos, ptype, atk_faction)
+		if not attacker_acc.is_empty():
+			AlignmentSystem.apply_action(attacker_name, -15)
+		NetworkManager.broadcast_season_data()
+		NetworkManager.broadcast_system_message("🔥 ¡ASEDIO! %s destruyó %s de %s." % [attacker_name, bname, owner_name], "#ff6b4a")
 	else:
 		_rpc_update_building_hp.rpc(building_id, new_hp)
 
@@ -329,11 +386,28 @@ func server_admin_repair_nearest(world_pos: Vector3) -> String:
 	return "Estructura #%d reparada al 100%%." % best_id
 
 
+func server_clear_all_buildings_for_season() -> void:
+	if not NetworkManager.is_server_running():
+		return
+	_rpc_clear_all_buildings.rpc()
+
+
+@rpc("authority", "call_local", "reliable")
+func _rpc_clear_all_buildings() -> void:
+	for bid_var: Variant in _building_nodes.keys():
+		var node: Node3D = _building_nodes[bid_var] as Node3D
+		if is_instance_valid(node):
+			node.queue_free()
+	_building_nodes.clear()
+	_building_records.clear()
+	_chunk_building_ids.clear()
+
+
 @rpc("authority", "call_local", "reliable")
 func _rpc_update_building_hp(building_id: int, new_hp: float) -> void:
 	if _building_records.has(building_id):
 		(_building_records[building_id] as Dictionary)["hp"] = new_hp
-	if _building_nodes.has(building_id):
+	if _building_nodes.has(building_id) and _building_nodes[building_id] is BuildPiece:
 		var bp: BuildPiece = _building_nodes[building_id] as BuildPiece
 		bp.update_hp(new_hp)
 
@@ -342,7 +416,7 @@ func _rpc_update_building_hp(building_id: int, new_hp: float) -> void:
 func _rpc_destroy_building(building_id: int) -> void:
 	_unindex_record(building_id)
 	if _building_nodes.has(building_id):
-		var bp: BuildPiece = _building_nodes[building_id] as BuildPiece
-		if is_instance_valid(bp):
-			bp.queue_free()
+		var node: Node3D = _building_nodes[building_id] as Node3D
+		if is_instance_valid(node):
+			node.queue_free()
 		_building_nodes.erase(building_id)

@@ -23,10 +23,27 @@ static var _rock_mesh: ArrayMesh = null
 static var _grass_mesh: ArrayMesh = null
 
 
+const TEX_GRASS_ALBEDO: Texture2D = preload("res://Assets/Textures/grass_albedo.jpg")
+const TEX_GRASS_NORMAL: Texture2D = preload("res://Assets/Textures/grass_normal.jpg")
+const TEX_GRASS_ROUGH: Texture2D = preload("res://Assets/Textures/grass_roughness.jpg")
+const TEX_DIRT_ALBEDO: Texture2D = preload("res://Assets/Textures/dirt_albedo.jpg")
+const TEX_DIRT_NORMAL: Texture2D = preload("res://Assets/Textures/dirt_normal.jpg")
+const TEX_ROCK_ALBEDO: Texture2D = preload("res://Assets/Textures/rock_albedo.jpg")
+const TEX_ROCK_NORMAL: Texture2D = preload("res://Assets/Textures/rock_normal.jpg")
+const TEX_ROCK_ROUGH: Texture2D = preload("res://Assets/Textures/rock_roughness.jpg")
+
 static func get_terrain_material() -> ShaderMaterial:
 	if _shared_material == null:
 		_shared_material = ShaderMaterial.new()
 		_shared_material.shader = TERRAIN_SHADER
+		_shared_material.set_shader_parameter("grass_albedo", TEX_GRASS_ALBEDO)
+		_shared_material.set_shader_parameter("grass_normal", TEX_GRASS_NORMAL)
+		_shared_material.set_shader_parameter("grass_roughness", TEX_GRASS_ROUGH)
+		_shared_material.set_shader_parameter("dirt_albedo", TEX_DIRT_ALBEDO)
+		_shared_material.set_shader_parameter("dirt_normal", TEX_DIRT_NORMAL)
+		_shared_material.set_shader_parameter("rock_albedo", TEX_ROCK_ALBEDO)
+		_shared_material.set_shader_parameter("rock_normal", TEX_ROCK_NORMAL)
+		_shared_material.set_shader_parameter("rock_roughness", TEX_ROCK_ROUGH)
 	return _shared_material
 
 

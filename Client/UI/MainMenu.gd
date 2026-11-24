@@ -1,8 +1,9 @@
 class_name MainMenu
 extends Control
 
-## Main Menu: Account Login/Register, Medieval Class & Cosmetic Selection,
-## Crónicas del Mundo button, Connect (IP:Port), Host Local, and Launch Dedicated Server.
+## Main Menu (Release 2.0): Account Login/Register, 3D Character Creator (5 Classes, 5 Races,
+## Appearance Customization), "Ver Historia" 3D Intro Cinematic, "Mapa del Mundo" preview,
+## Connect (IP:Port), Host Local, and Launch Dedicated Server.
 
 @onready var user_input: LineEdit = $Margin/RootVBox/Columns/LeftCard/LeftVBox/UserInput
 @onready var pass_input: LineEdit = $Margin/RootVBox/Columns/LeftCard/LeftVBox/PassInput
@@ -13,6 +14,8 @@ extends Control
 @onready var host_btn: Button = $Margin/RootVBox/Columns/LeftCard/LeftVBox/ButtonsBox/HostBtn
 @onready var dedicated_btn: Button = $Margin/RootVBox/Columns/LeftCard/LeftVBox/ButtonsBox/DedicatedBtn
 @onready var lore_btn: Button = $Margin/RootVBox/Columns/LeftCard/LeftVBox/LoreBtn
+@onready var left_vbox: VBoxContainer = $Margin/RootVBox/Columns/LeftCard/LeftVBox
+@onready var right_vbox: VBoxContainer = $Margin/RootVBox/Columns/RightCard/RightVBox
 @onready var status_label: Label = $Margin/RootVBox/StatusLabel
 
 @onready var class_option: OptionButton = $Margin/RootVBox/Columns/RightCard/RightVBox/ClassOption
@@ -23,12 +26,15 @@ extends Control
 var _class_keys: Array[String] = []
 var _armor_keys: Array[String] = []
 var _dragon_keys: Array[String] = []
+var _char_creator: CharacterCreator = null
+var _world_map_ui: WorldMapUI = null
+var _selected_race_id: String = "HUMAN_VALLEY"
+var _selected_appearance: Dictionary = {}
 
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
-	# Auto-boot Dedicated Headless Server if launched with --server or headless display
 	if NetworkManager.is_dedicated_server_launch():
 		var port: int = NetworkManager.get_launch_port()
 		var err: Error = NetworkManager.start_dedicated_server(port)
@@ -37,6 +43,7 @@ func _ready() -> void:
 		return
 
 	_populate_selectors()
+	_inject_v2_widgets()
 
 	host_input.text = str(DatabaseManager.client_prefs.get("last_host", GameConfig.DEFAULT_HOST))
 	port_input.value = float(DatabaseManager.client_prefs.get("last_port", GameConfig.DEFAULT_PORT))
@@ -53,6 +60,64 @@ func _ready() -> void:
 	NetworkManager.auth_failed.connect(_on_auth_failed)
 	_on_class_selected(0)
 	_setup_gamepad_focus_neighbors()
+
+
+func _inject_v2_widgets() -> void:
+	# Extra Release 2.0 buttons in Left Column: "Ver Historia" (3D Cinematic) & "Mapa del Mundo"
+	var extra_row: HBoxContainer = HBoxContainer.new()
+	extra_row.add_theme_constant_override("separation", 8)
+	left_vbox.add_child(extra_row)
+
+	var story_btn: Button = Button.new()
+	story_btn.text = "🎬 Ver Historia (Intro 3D)"
+	story_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	story_btn.custom_minimum_size = Vector2(0.0, 34.0)
+	story_btn.pressed.connect(func() -> void:
+		AudioSynth.play_ui_click()
+		get_tree().change_scene_to_file("res://Client/UI/IntroCinematic.tscn")
+	)
+	extra_row.add_child(story_btn)
+
+	var map_btn: Button = Button.new()
+	map_btn.text = "🗺️ Mapa del Mundo"
+	map_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_btn.custom_minimum_size = Vector2(0.0, 34.0)
+	map_btn.pressed.connect(_on_open_map_preview)
+	extra_row.add_child(map_btn)
+
+	# Embed 3D Character Creator (5 Races, 3D Rotating Preview, Skin/Armor Tint, Hide Helmet)
+	_char_creator = CharacterCreator.new()
+	_char_creator.custom_minimum_size = Vector2(0.0, 230.0)
+	_char_creator.selection_changed.connect(_on_creator_changed)
+	right_vbox.add_child(_char_creator)
+	right_vbox.move_child(_char_creator, 1)
+	class_desc.custom_minimum_size = Vector2(0.0, 110.0)
+
+	# World Map preview modal overlay
+	_world_map_ui = WorldMapUI.new()
+	_world_map_ui.set_anchors_preset(Control.PRESET_CENTER)
+	_world_map_ui.offset_left = -480.0
+	_world_map_ui.offset_right = 480.0
+	_world_map_ui.offset_top = -310.0
+	_world_map_ui.offset_bottom = 310.0
+	add_child(_world_map_ui)
+
+
+func _on_open_map_preview() -> void:
+	AudioSynth.play_ui_click()
+	if _world_map_ui != null:
+		DatabaseManager.load_database()
+		_world_map_ui.refresh_map(Vector3.ZERO, DatabaseManager.get_season_state(), ["ws_alba", "ws_caos"], false)
+		_world_map_ui.visible = true
+
+
+func _on_creator_changed(cid: String, rid: String, app: Dictionary) -> void:
+	_selected_race_id = rid
+	_selected_appearance = app
+	var idx: int = _class_keys.find(cid)
+	if idx >= 0 and class_option.selected != idx:
+		class_option.select(idx)
+		_on_class_selected(idx)
 
 
 func _setup_gamepad_focus_neighbors() -> void:
@@ -119,13 +184,10 @@ func _on_class_selected(idx: int) -> void:
 		var ab: Dictionary = abilities[i] as Dictionary
 		ab_lines += "\n  [color=#ffe066][%d] %s:[/color] %s" % [i + 1, str(ab["name"]), str(ab["desc"])]
 	class_desc.text = (
-		"[b]%s[/b]\n%s\n\n"
-		+ "[color=#9ec5fe]HP:[/color] %d  |  [color=#9ec5fe]Maná:[/color] %d  |  [color=#9ec5fe]Estamina:[/color] %d\n"
-		+ "[color=#9ec5fe]Ataque:[/color] %d  |  [color=#9ec5fe]Poder Mágico:[/color] %d  |  [color=#9ec5fe]Defensa:[/color] %d\n"
+		"[b]%s[/b] — HP %d | Maná %d | Estamina %d | Atq %d | Mag %d | Def %d"
 		+ "\n[b]Habilidades Activas:[/b]%s"
 	) % [
 		str(c["name"]),
-		str(c["description"]),
 		int(c["max_hp"]),
 		int(c["max_mana"]),
 		int(c["max_stamina"]),
@@ -178,7 +240,9 @@ func _on_connect_pressed() -> void:
 		pass_input.text,
 		register_check.button_pressed,
 		cid,
-		_collect_cosmetics_choice()
+		_collect_cosmetics_choice(),
+		_selected_race_id,
+		_selected_appearance
 	)
 
 
@@ -194,7 +258,9 @@ func _on_host_pressed() -> void:
 		pass_input.text,
 		register_check.button_pressed,
 		cid,
-		_collect_cosmetics_choice()
+		_collect_cosmetics_choice(),
+		_selected_race_id,
+		_selected_appearance
 	)
 
 

@@ -61,6 +61,9 @@ var _net_target_state: int = FlightState.GROUNDED
 @onready var mount_camera: Camera3D = $CameraPivot/SpringArm3D/Camera3D
 
 var _rig: Dictionary = {}
+var _storm_light: OmniLight3D = null
+var _storm_flash_timer: float = 0.0
+var _last_dragon_anim: String = ""
 
 
 func setup(p_owner_peer: int, p_skin: String, p_trail: String, p_grace: bool, local_spawn_pos: Vector3) -> void:
@@ -80,8 +83,22 @@ func _ready() -> void:
 	collision_layer = GameConfig.LAYER_DRAGONS
 	collision_mask = GameConfig.LAYER_TERRAIN | GameConfig.LAYER_BUILDINGS
 	_net_target_pos = global_position
+	_storm_light = OmniLight3D.new()
+	_storm_light.light_color = Color(0.65, 0.85, 1.0)
+	_storm_light.omni_range = 42.0
+	_storm_light.light_energy = 0.0
+	_storm_light.position = Vector3(0.0, 6.0, 0.0)
+	add_child(_storm_light)
 	_rebuild_visual()
 	_apply_camera_mode(1.0)
+
+
+func trigger_summon_storm() -> void:
+	_storm_flash_timer = 1.25
+	if _storm_light != null:
+		_storm_light.light_energy = 9.0
+	AudioSynth.play_thunder()
+	AudioSynth.play_dragon_roar()
 
 
 func apply_floating_origin_shift(delta_vec: Vector3) -> void:
@@ -91,6 +108,7 @@ func apply_floating_origin_shift(delta_vec: Vector3) -> void:
 
 func _rebuild_visual() -> void:
 	_rig = ProceduralMeshFactory.build_dragon_rig(visual_root, dragon_skin_id, trail_id)
+	_last_dragon_anim = ""
 	set_combat_grace(has_combat_grace)
 
 
@@ -170,9 +188,19 @@ func _apply_camera_mode(blend: float) -> void:
 	camera_pivot.position = camera_pivot.position.lerp(target_pos, blend)
 	spring_arm.spring_length = lerpf(spring_arm.spring_length, target_len, blend)
 	camera_pivot.rotation = Vector3(_cam_pitch, _cam_yaw_offset, 0.0)
+	# Dynamic flight FOV (72 deg grounded -> up to 92 deg at turbo air speed)
+	if mount_camera != null:
+		var spd_ratio: float = clampf((air_speed - MIN_AIR_SPEED) / maxf(1.0, MAX_AIR_SPEED - MIN_AIR_SPEED), 0.0, 1.0) if flight_state != FlightState.GROUNDED else 0.0
+		var target_fov: float = lerpf(72.0, 92.0, spd_ratio)
+		mount_camera.fov = lerpf(mount_camera.fov, target_fov, clampf(blend * 0.5, 0.05, 1.0))
 
 
 func _physics_process(delta: float) -> void:
+	if _storm_flash_timer > 0.0:
+		_storm_flash_timer = maxf(0.0, _storm_flash_timer - delta)
+		if _storm_light != null:
+			_storm_light.light_energy = lerpf(_storm_light.light_energy, 0.0, clampf(delta * 5.5, 0.0, 1.0))
+
 	if is_local_controlled and is_mounted:
 		_process_gamepad_look(delta)
 		_process_local_flight(delta)
@@ -196,7 +224,6 @@ func _process_gamepad_look(delta: float) -> void:
 	if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		return
 	var raw_look: Vector2 = Input.get_vector("cam_look_left", "cam_look_right", "cam_look_up", "cam_look_down")
-	# Console-style response curve + smoothing with 0.15 deadzone
 	if raw_look.length() < 0.15:
 		raw_look = Vector2.ZERO
 	else:
@@ -214,7 +241,6 @@ func _process_local_flight(delta: float) -> void:
 	var descend_held: bool = (not ui_open) and Input.is_action_pressed("descend")
 	var air_brake_glide: bool = (not ui_open) and Input.is_action_pressed("block_secondary")
 
-	# Support both Shift hold AND L3 click toggle for turbo boost
 	if (not ui_open) and Input.is_action_just_pressed("sprint") and Input.is_joy_button_pressed(0, JOY_BUTTON_LEFT_STICK):
 		_turbo_toggled = not _turbo_toggled
 	var boost_held: bool = (not ui_open) and (Input.is_action_pressed("sprint") or _turbo_toggled)
@@ -306,12 +332,10 @@ func _process_local_flight(delta: float) -> void:
 				velocity = Vector3.ZERO
 				flight_state = FlightState.GROUNDED
 
-	# Infinite XZ travel — only clamp floor clearance and altitude ceiling
 	global_position.y = clampf(global_position.y, maxf(ground_y + 0.05, GameConfig.WATER_LEVEL + 1.0), 240.0)
 	rotation = Vector3(pitch_angle, yaw_angle, roll_angle)
 	move_and_slide()
 
-	# Dragon Fire Breath (LMB / RT-R2) aimed toward center screen crosshair
 	var wants_breath: bool = (not ui_open) and Input.is_action_pressed("attack_primary")
 	if wants_breath and _breath_energy > 8.0:
 		if not is_breathing_fire:
@@ -376,6 +400,27 @@ func get_flight_state_label() -> String:
 
 
 func _animate_dragon(delta: float) -> void:
+	# Drive real dragon.glb AnimationPlayer when present
+	var ap: AnimationPlayer = _rig.get("anim_player", null) as AnimationPlayer
+	if ap != null:
+		var target_anim: String = "Dragon_Hit" if is_breathing_fire and ap.has_animation("Dragon_Hit") else "Dragon_Flying"
+		if ap.has_animation(target_anim):
+			var speed_scale: float = 0.45 if flight_state == FlightState.GROUNDED else (0.65 if flight_state == FlightState.GLIDING else 1.25)
+			ap.speed_scale = speed_scale
+			if _last_dragon_anim != target_anim or not ap.is_playing():
+				var anim_res: Animation = ap.get_animation(target_anim)
+				if anim_res != null:
+					anim_res.loop_mode = Animation.LOOP_LINEAR
+				ap.play(target_anim, 0.15)
+				_last_dragon_anim = target_anim
+		if is_local_controlled and (flight_state == FlightState.FLYING or flight_state == FlightState.TAKEOFF):
+			_flap_sound_timer += delta
+			if _flap_sound_timer >= 0.65:
+				_flap_sound_timer = 0.0
+				AudioSynth.play_wing_flap()
+		return
+
+	# Procedural fallback wing/tail animation
 	var wl_root: Node3D = _rig.get("wing_l_root", null) as Node3D
 	var wl_tip: Node3D = _rig.get("wing_l_tip", null) as Node3D
 	var wr_root: Node3D = _rig.get("wing_r_root", null) as Node3D

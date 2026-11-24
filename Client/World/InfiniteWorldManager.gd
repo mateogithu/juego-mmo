@@ -10,10 +10,12 @@ extends Node3D
 const WATER_SHADER: Shader = preload("res://Client/Shaders/water.gdshader")
 const RESOURCE_SCENE: PackedScene = preload("res://Client/Entities/ResourceNode.tscn")
 const STATION_SCENE: PackedScene = preload("res://Client/Entities/WorldStation.tscn")
+const WAYSHRINE_SCENE: PackedScene = preload("res://Client/Entities/Wayshrine.tscn")
 
 @onready var terrain_chunks_root: Node3D = $TerrainChunks
 @onready var landmarks_root: Node3D = $Landmarks
 @onready var stations_root: Node3D = $Stations
+@onready var wayshrines_root: Node3D = $Wayshrines
 @onready var dungeons_root: Node3D = $Dungeons
 @onready var bosses_root: Node3D = $Bosses
 @onready var water_plane: MeshInstance3D = $WaterPlane
@@ -47,6 +49,7 @@ func _ready() -> void:
 	_setup_water_plane()
 	_build_primordial_landmarks()
 	_spawn_settlement_stations()
+	_spawn_world_wayshrines()
 	DungeonGenerator.build_all_dungeons(dungeons_root)
 	if world_auth != null:
 		world_auth.local_player_ready.connect(_on_local_player_ready)
@@ -64,18 +67,34 @@ func _spawn_settlement_stations() -> void:
 		return
 	for child: Node in stations_root.get_children():
 		child.queue_free()
-	var station_defs: Array = [
-		["forge", "Yunque y Forja de Herrería", Vector2(-14.0, 9.0)],
-		["alchemy", "Banco de Alquimia", Vector2(14.0, 9.0)],
-		["shop_stall", "Tienda y Mercado del Valle", Vector2(0.0, -15.0)]
-	]
-	for s_var: Variant in station_defs:
-		var sdef: Array = s_var as Array
-		var xz: Vector2 = sdef[2] as Vector2
+	var hubs: Array[Vector2] = [Vector2(0.0, 0.0), Vector2(260.0, 260.0)]
+	for hub: Vector2 in hubs:
+		var station_defs: Array = [
+			["forge", "Yunque y Forja de Herrería", hub + Vector2(-14.0, 9.0)],
+			["alchemy", "Banco de Alquimia", hub + Vector2(14.0, 9.0)],
+			["campfire", "Fogata de Cocina", hub + Vector2(-10.0, -10.0)],
+			["shop_stall", "Tablón del Mercado de Jugadores", hub + Vector2(0.0, -15.0)]
+		]
+		for s_var: Variant in station_defs:
+			var sdef: Array = s_var as Array
+			var xz: Vector2 = sdef[2] as Vector2
+			var wy: float = GameConfig.sample_terrain_height(xz.x, xz.y)
+			var st_node: WorldStation = STATION_SCENE.instantiate() as WorldStation
+			stations_root.add_child(st_node)
+			st_node.setup(str(sdef[0]), str(sdef[1]), Vector3(xz.x, wy, xz.y))
+
+
+func _spawn_world_wayshrines() -> void:
+	if wayshrines_root == null:
+		return
+	for child: Node in wayshrines_root.get_children():
+		child.queue_free()
+	for wdef: Dictionary in GameConfig.WAYSHRINES:
+		var xz: Vector2 = wdef.get("xz", Vector2.ZERO) as Vector2
 		var wy: float = GameConfig.sample_terrain_height(xz.x, xz.y)
-		var st_node: WorldStation = STATION_SCENE.instantiate() as WorldStation
-		stations_root.add_child(st_node)
-		st_node.setup(str(sdef[0]), str(sdef[1]), Vector3(xz.x, wy, xz.y))
+		var ws: Wayshrine = WAYSHRINE_SCENE.instantiate() as Wayshrine
+		wayshrines_root.add_child(ws)
+		ws.setup(str(wdef.get("id", "")), str(wdef.get("name", "Ermita")), str(wdef.get("region", "")), Vector3(xz.x, wy, xz.y))
 
 
 func _on_local_player_ready(pc: PlayerController) -> void:
@@ -108,6 +127,7 @@ func _rebuild_all_chunks() -> void:
 		child.queue_free()
 	_build_primordial_landmarks()
 	_spawn_settlement_stations()
+	_spawn_world_wayshrines()
 	DungeonGenerator.build_all_dungeons(dungeons_root)
 	var focus_world: Vector3 = GameConfig.local_to_world(_local_player.global_position) if (_local_player != null and is_instance_valid(_local_player)) else Vector3.ZERO
 	_update_chunk_streaming(focus_world, GameConfig.GROUND_CHUNK_RADIUS, true)
@@ -152,7 +172,7 @@ func _perform_floating_origin_shift(focus_local: Vector3) -> void:
 	GameConfig.world_origin_offset += shift
 	var delta_vec: Vector3 = -shift
 
-	for container: Node3D in [terrain_chunks_root, landmarks_root, stations_root, dungeons_root, buildings_root, projectiles_root, resources_root, loot_root]:
+	for container: Node3D in [terrain_chunks_root, landmarks_root, stations_root, wayshrines_root, dungeons_root, buildings_root, projectiles_root, resources_root, loot_root]:
 		if container == null:
 			continue
 		for child: Node in container.get_children():
@@ -211,7 +231,6 @@ func _update_chunk_streaming(focus_world: Vector3, radius: int, force: bool) -> 
 				if not _chunk_resources.has(coord) and dist_cheb <= 2:
 					_spawn_chunk_resources(coord)
 
-	# Immediately free distant chunks & their resources to stay comfortably under 8 GB RAM
 	var to_remove: Array[Vector2i] = []
 	for coord_var: Variant in _loaded_chunks.keys():
 		var coord: Vector2i = coord_var as Vector2i
@@ -285,24 +304,94 @@ func _setup_water_plane() -> void:
 func _build_primordial_landmarks() -> void:
 	if landmarks_root == null:
 		return
-	var stone_mat: StandardMaterial3D = ProceduralMeshFactory.make_pbr_material(Color(0.5, 0.5, 0.54), 0.85, 0.08)
-	var order_glow: StandardMaterial3D = ProceduralMeshFactory.make_pbr_material(Color(1.0, 0.86, 0.34), 0.15, 0.5, Color(1.0, 0.84, 0.3), 2.4)
-	var chaos_glow: StandardMaterial3D = ProceduralMeshFactory.make_pbr_material(Color(1.0, 0.28, 0.14), 0.15, 0.5, Color(1.0, 0.24, 0.12), 2.4)
+	var order_stone: StandardMaterial3D = ProceduralMeshFactory.make_stone_pbr_material(Color(0.86, 0.85, 0.80))
+	var chaos_stone: StandardMaterial3D = ProceduralMeshFactory.make_stone_pbr_material(Color(0.32, 0.24, 0.26))
+	var order_glow: StandardMaterial3D = ProceduralMeshFactory.make_pbr_material(Color(1.0, 0.86, 0.34), 0.15, 0.5, Color(1.0, 0.84, 0.3), 2.8)
+	var chaos_glow: StandardMaterial3D = ProceduralMeshFactory.make_pbr_material(Color(1.0, 0.28, 0.14), 0.15, 0.5, Color(1.0, 0.24, 0.12), 2.8)
 
-	var center_y: float = GameConfig.sample_terrain_height(0.0, 0.0)
+	# Build both indestructible walled Capital Safe Zones
+	for sdef: Dictionary in GameConfig.SAFE_ZONES:
+		var is_order: bool = str(sdef.get("faction", "")) == GameConfig.PHILOSOPHY_ORDER
+		var center_xz: Vector2 = sdef.get("center_xz", Vector2.ZERO) as Vector2
+		var radius: float = float(sdef.get("radius", 34.0))
+		_build_sanctuary_walls(center_xz, radius, order_stone if is_order else chaos_stone, order_glow if is_order else chaos_glow, str(sdef.get("name", "Santuario")))
+
+	_spawn_obelisk(Vector3(-46.0, GameConfig.sample_terrain_height(-46.0, -24.0), -24.0), order_stone, order_glow, "ObeliskOrder")
+	_spawn_obelisk(Vector3(212.0, GameConfig.sample_terrain_height(212.0, 236.0), 236.0), chaos_stone, chaos_glow, "ObeliskChaos")
+
+
+func _build_sanctuary_walls(center_xz: Vector2, radius: float, wall_mat: Material, torch_mat: Material, title: String) -> void:
+	var cy: float = GameConfig.sample_terrain_height(center_xz.x, center_xz.y)
+	var root: StaticBody3D = StaticBody3D.new()
+	root.name = "Sanctuary_%d_%d" % [int(center_xz.x), int(center_xz.y)]
+	root.collision_layer = GameConfig.LAYER_BUILDINGS
+	root.collision_mask = 0
+	root.position = GameConfig.world_to_local(Vector3(center_xz.x, cy, center_xz.y))
+	landmarks_root.add_child(root)
+
+	# Paved circular central plaza
 	var plaza: MeshInstance3D = MeshInstance3D.new()
 	var disc: CylinderMesh = CylinderMesh.new()
-	disc.top_radius = 12.0
-	disc.bottom_radius = 13.0
-	disc.height = 0.4
-	disc.radial_segments = 16
+	disc.top_radius = radius - 1.5
+	disc.bottom_radius = radius
+	disc.height = 0.35
+	disc.radial_segments = 24
 	plaza.mesh = disc
-	plaza.material_override = stone_mat
-	plaza.position = GameConfig.world_to_local(Vector3(0.0, center_y - 0.1, 0.0))
-	landmarks_root.add_child(plaza)
+	plaza.material_override = wall_mat
+	plaza.position = Vector3(0.0, -0.1, 0.0)
+	root.add_child(plaza)
 
-	_spawn_obelisk(Vector3(-42.0, GameConfig.sample_terrain_height(-42.0, -24.0), -24.0), stone_mat, order_glow, "ObeliskOrder")
-	_spawn_obelisk(Vector3(42.0, GameConfig.sample_terrain_height(42.0, 24.0), 24.0), stone_mat, chaos_glow, "ObeliskChaos")
+	# 16-segment indestructible perimeter stone wall with 4 open cardinal gates (N, S, E, W)
+	var seg_count: int = 16
+	for i: int in range(seg_count):
+		var is_gate: bool = (i == 0 or i == 4 or i == 8 or i == 12)
+		var angle: float = (float(i) / float(seg_count)) * TAU
+		var pos: Vector3 = Vector3(cos(angle) * radius, 3.2, sin(angle) * radius)
+		if is_gate:
+			# Grand Gateway Arch + Banner + Twin Torches
+			var arch: MeshInstance3D = MeshInstance3D.new()
+			var am: BoxMesh = BoxMesh.new()
+			am.size = Vector3(1.6, 1.8, 12.5)
+			arch.mesh = am
+			arch.material_override = wall_mat
+			arch.position = Vector3(cos(angle) * radius, 6.8, sin(angle) * radius)
+			arch.rotation.y = -angle
+			root.add_child(arch)
+
+			var sign_lbl: Label3D = Label3D.new()
+			sign_lbl.text = "🛡️ %s\n(ZONA SEGURA — SIN PVP)" % title
+			sign_lbl.font_size = 44
+			sign_lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+			sign_lbl.position = Vector3(cos(angle) * radius, 9.2, sin(angle) * radius)
+			root.add_child(sign_lbl)
+			continue
+
+		var wall_mi: MeshInstance3D = MeshInstance3D.new()
+		var wm: BoxMesh = BoxMesh.new()
+		wm.size = Vector3(1.8, 6.4, 13.6)
+		wall_mi.mesh = wm
+		wall_mi.material_override = wall_mat
+		wall_mi.position = pos
+		wall_mi.rotation.y = -angle
+		root.add_child(wall_mi)
+
+		var wcol: CollisionShape3D = CollisionShape3D.new()
+		var wshape: BoxShape3D = BoxShape3D.new()
+		wshape.size = wm.size
+		wcol.shape = wshape
+		wcol.position = pos
+		wcol.rotation.y = -angle
+		root.add_child(wcol)
+
+		# Glowing runic torch beacon atop wall segment
+		var orb: MeshInstance3D = MeshInstance3D.new()
+		var om: SphereMesh = SphereMesh.new()
+		om.radius = 0.55
+		om.height = 1.1
+		orb.mesh = om
+		orb.material_override = torch_mat
+		orb.position = Vector3(cos(angle) * radius, 7.0, sin(angle) * radius)
+		root.add_child(orb)
 
 
 func _spawn_obelisk(world_pos: Vector3, stone_mat: Material, glow_mat: Material, node_name: String) -> void:

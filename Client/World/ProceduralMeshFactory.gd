@@ -9,6 +9,31 @@ extends RefCounted
 
 const SHADER_GRACE_AURA: Shader = preload("res://Client/Shaders/combat_grace_aura.gdshader")
 const SHADER_DRAGON_FIRE: Shader = preload("res://Client/Shaders/dragon_fire.gdshader")
+const TEX_STONE_ALBEDO: Texture2D = preload("res://Assets/Textures/stone_albedo.jpg")
+const TEX_STONE_NORMAL: Texture2D = preload("res://Assets/Textures/stone_normal.jpg")
+const TEX_STONE_ROUGH: Texture2D = preload("res://Assets/Textures/stone_roughness.jpg")
+
+
+static func make_stone_pbr_material(tint: Color = Color(0.95, 0.95, 0.95)) -> StandardMaterial3D:
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = tint
+	mat.albedo_texture = TEX_STONE_ALBEDO
+	mat.normal_enabled = true
+	mat.normal_texture = TEX_STONE_NORMAL
+	mat.roughness_texture = TEX_STONE_ROUGH
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3(0.35, 0.35, 0.35)
+	return mat
+
+
+static func _find_child_of_type(node: Node, type_name: String) -> Node:
+	if node.is_class(type_name):
+		return node
+	for c: Node in node.get_children():
+		var found: Node = _find_child_of_type(c, type_name)
+		if found != null:
+			return found
+	return null
 
 
 static func make_pbr_material(
@@ -348,12 +373,15 @@ static func _try_load_external_glb(res_path: String) -> Node3D:
 
 # --- Sculpted Stylized Medieval Characters (+ Auto .glb Loader) ---
 
-static func build_humanoid_rig(root: Node3D, class_id: String, armor_skin_id: String) -> Dictionary:
+static func build_humanoid_rig(root: Node3D, class_id: String, armor_skin_id: String, race_id: String = "HUMAN_VALLEY", appearance: Dictionary = {}) -> Dictionary:
 	for child: Node in root.get_children():
 		child.queue_free()
 
 	var skin: Dictionary = GameConfig.COSMETIC_ARMORS.get(armor_skin_id, GameConfig.COSMETIC_ARMORS["default_iron"]) as Dictionary
 	var class_def: Dictionary = GameConfig.CLASSES.get(class_id, GameConfig.CLASSES["ARCANE_KNIGHT"]) as Dictionary
+	var race_def: Dictionary = GameConfig.RACES.get(race_id, GameConfig.RACES["HUMAN_VALLEY"]) as Dictionary
+	var race_scale_y: float = float(race_def.get("scale_y", 1.0))
+
 	var primary_mat: StandardMaterial3D = make_pbr_material(
 		skin.get("primary", Color(0.5, 0.52, 0.58)) as Color,
 		float(skin.get("roughness", 0.36)),
@@ -372,31 +400,52 @@ static func build_humanoid_rig(root: Node3D, class_id: String, armor_skin_id: St
 	)
 	var accent: Color = class_def.get("accent_color", Color(0.3, 0.7, 1.0)) as Color
 	var glow_mat: StandardMaterial3D = make_pbr_material(accent, 0.15, 0.1, accent, 2.4)
-	var skin_mat: StandardMaterial3D = make_pbr_material(Color(0.84, 0.68, 0.56), 0.72, 0.0)
+	var skin_hex: String = str(appearance.get("skin_color", ""))
+	var skin_col: Color = Color.html(skin_hex) if skin_hex.length() >= 6 else (race_def.get("default_skin", Color(0.84, 0.68, 0.56)) as Color)
+	var skin_mat: StandardMaterial3D = make_pbr_material(skin_col, 0.72, 0.0)
 	var steel_mat: StandardMaterial3D = make_pbr_material(Color(0.82, 0.86, 0.92), 0.2, 0.94)
 
 	# ModelOrient rotated PI so +Z glTF/sculpted front ALWAYS faces -Z (away from 3rd-person camera)
 	var body_pivot: Node3D = Node3D.new()
 	body_pivot.name = "BodyPivot"
 	body_pivot.rotation.y = PI
+	body_pivot.scale = Vector3(1.0, race_scale_y, 1.0)
 	root.add_child(body_pivot)
 
-	# Automatic external .glb model replacement if present in res://Assets/Models/
+	# Automatic real CC0 .glb loader with Skeleton3D + AnimationPlayer (procedural kept as fallback)
 	var glb_map: Dictionary = {
 		"ARCANE_KNIGHT": "res://Assets/Models/player_knight.glb",
 		"PYROMANCER": "res://Assets/Models/player_mage.glb",
 		"WAR_CLERIC": "res://Assets/Models/player_cleric.glb",
-		"SHADOW_ASSASSIN": "res://Assets/Models/player_rogue.glb"
+		"SHADOW_ASSASSIN": "res://Assets/Models/player_rogue.glb",
+		"VALLEY_HUNTER": "res://Assets/Models/player_ranger.glb"
 	}
 	var custom_glb: Node3D = _try_load_external_glb(str(glb_map.get(class_id, "")))
 	if custom_glb != null:
 		custom_glb.name = "ExternalGLB"
+		custom_glb.scale = Vector3.ONE * 0.86
 		body_pivot.add_child(custom_glb)
+		var ap: AnimationPlayer = _find_child_of_type(custom_glb, "AnimationPlayer") as AnimationPlayer
+		var skel: Skeleton3D = _find_child_of_type(custom_glb, "Skeleton3D") as Skeleton3D
+		if ap != null and ap.has_animation("Idle"):
+			var idle_anim: Animation = ap.get_animation("Idle")
+			if idle_anim != null:
+				idle_anim.loop_mode = Animation.LOOP_LINEAR
+			ap.play("Idle")
+		var divine_crown_glb: Node3D = Node3D.new()
+		divine_crown_glb.name = "DivineCrown"
+		divine_crown_glb.position = Vector3(0.0, 2.28, 0.0)
+		divine_crown_glb.visible = false
+		body_pivot.add_child(divine_crown_glb)
+		var crown_mat_g: StandardMaterial3D = make_pbr_material(Color(1.0, 0.88, 0.35), 0.15, 0.92, Color(1.0, 0.85, 0.3), 2.8)
+		_add_torus(divine_crown_glb, 0.28, 0.35, Vector3.ZERO, crown_mat_g, "DivineHalo")
 		var aura_glb: MeshInstance3D = _build_humanoid_grace_aura(root)
 		return {
 			"body_pivot": body_pivot,
 			"torso": custom_glb,
 			"head": custom_glb,
+			"anim_player": ap,
+			"skeleton": skel,
 			"cape": null,
 			"arm_l": null,
 			"arm_r": null,
@@ -404,7 +453,7 @@ static func build_humanoid_rig(root: Node3D, class_id: String, armor_skin_id: St
 			"leg_r": null,
 			"weapon_pivot": null,
 			"shield_pivot": null,
-			"divine_crown": null,
+			"divine_crown": divine_crown_glb,
 			"grace_aura": aura_glb
 		}
 
@@ -690,15 +739,25 @@ static func build_dragon_rig(root: Node3D, dragon_skin_id: String, trail_id: Str
 	body.name = "DragonBody"
 	root.add_child(body)
 
-	# Auto-load custom dragon.glb if provided by the user
+	# Auto-load real rigged dragon.glb (Quaternius CC0) oriented -Z with AnimationPlayer & Skeleton3D
 	var custom_dragon: Node3D = _try_load_external_glb("res://Assets/Models/dragon.glb")
 	if custom_dragon != null:
 		custom_dragon.name = "ExternalDragonGLB"
+		custom_dragon.rotation.y = PI
+		custom_dragon.scale = Vector3.ONE * 1.45
 		body.add_child(custom_dragon)
-		var cone_glb: MeshInstance3D = _make_dragon_breath_cone(body, breath_col, Vector3(0.0, 2.2, -12.0))
+		var dap: AnimationPlayer = _find_child_of_type(custom_dragon, "AnimationPlayer") as AnimationPlayer
+		var dskel: Skeleton3D = _find_child_of_type(custom_dragon, "Skeleton3D") as Skeleton3D
+		if dap != null and dap.has_animation("Dragon_Flying"):
+			var fa: Animation = dap.get_animation("Dragon_Flying")
+			if fa != null:
+				fa.loop_mode = Animation.LOOP_LINEAR
+			dap.play("Dragon_Flying")
+		var cone_glb: MeshInstance3D = _make_dragon_breath_cone(body, breath_col, Vector3(0.0, 2.3, -11.5))
 		var aura_glb: MeshInstance3D = _make_dragon_grace_aura(body)
 		return {
 			"body": body, "neck": custom_dragon, "head": custom_dragon, "jaw": null,
+			"anim_player": dap, "skeleton": dskel,
 			"tail_1": null, "tail_2": null, "wing_l_root": null, "wing_l_tip": null,
 			"wing_r_root": null, "wing_r_tip": null, "breath_cone": cone_glb,
 			"trail": null, "grace_aura": aura_glb
@@ -1048,14 +1107,19 @@ static func build_station_visual(root: Node3D, station_type: String) -> void:
 	var fire_mat: StandardMaterial3D = make_pbr_material(Color(1.0, 0.46, 0.12), 0.2, 0.0, Color(1.0, 0.42, 0.08), 3.0)
 
 	if station_type == "forge":
-		# Stone forge hearth with glowing coals + curved iron anvil
-		_add_cylinder(root, 1.35, 1.55, 1.2, Vector3(-0.8, 0.6, -0.4), stone_mat, "ForgeHearth", 10)
-		_add_cylinder(root, 0.65, 1.05, 1.9, Vector3(-0.8, 2.1, -0.5), stone_mat, "Chimney", 8)
+		_add_cylinder(root, 1.35, 1.55, 1.2, Vector3(-0.8, 0.6, -0.4), make_stone_pbr_material(), "ForgeHearth", 10)
+		_add_cylinder(root, 0.65, 1.05, 1.9, Vector3(-0.8, 2.1, -0.5), make_stone_pbr_material(), "Chimney", 8)
 		_add_sphere(root, 0.72, Vector3(-0.8, 1.28, -0.25), fire_mat, "Embers", Vector3(1.1, 0.45, 1.0))
-		# Sculpted Anvil
 		_add_cylinder(root, 0.42, 0.5, 0.55, Vector3(1.0, 0.28, 0.4), wood_mat, "AnvilStump", 12)
 		_add_cylinder(root, 0.24, 0.34, 0.35, Vector3(1.0, 0.72, 0.4), iron_mat, "AnvilWaist", 10)
 		_add_capsule(root, 0.2, 0.95, Vector3(1.0, 0.98, 0.4), iron_mat, "AnvilHorn", Vector3(0.0, 0.0, 90.0))
+	elif station_type == "campfire":
+		# Stone-ringed cooking campfire with suspended stew pot
+		_add_torus(root, 0.75, 1.05, Vector3(0.0, 0.14, 0.0), stone_mat, "FireRing")
+		_add_sphere(root, 0.48, Vector3(0.0, 0.36, 0.0), fire_mat, "CampFlames", Vector3(1.0, 1.35, 1.0))
+		_add_cylinder(root, 0.06, 0.07, 1.9, Vector3(-0.85, 0.9, 0.0), wood_mat, "TripodL", 8, Vector3(0.0, 0.0, -18.0))
+		_add_cylinder(root, 0.06, 0.07, 1.9, Vector3(0.85, 0.9, 0.0), wood_mat, "TripodR", 8, Vector3(0.0, 0.0, 18.0))
+		_add_sphere(root, 0.44, Vector3(0.0, 0.92, 0.0), iron_mat, "CookingPot", Vector3(1.0, 0.78, 1.0))
 	elif station_type == "alchemy":
 		var emerald_mat: StandardMaterial3D = make_pbr_material(Color(0.24, 0.95, 0.55), 0.12, 0.1, Color(0.2, 0.9, 0.48), 2.5)
 		var arcane_mat: StandardMaterial3D = make_pbr_material(Color(0.45, 0.68, 1.0), 0.12, 0.1, Color(0.38, 0.62, 1.0), 2.5)
@@ -1065,10 +1129,9 @@ static func build_station_visual(root: Node3D, station_type: String) -> void:
 		_add_sphere(root, 0.18, Vector3(0.42, 1.18, -0.2), arcane_mat, "FlaskBlue")
 		_add_torus(root, 0.32, 0.38, Vector3(0.0, 1.45, 0.0), arcane_mat, "AlchemyRing")
 	else:
-		# Physical Medieval Shop Stall with scalloped awning, barrels & lantern
 		var canopy_mat: StandardMaterial3D = make_pbr_material(Color(0.74, 0.2, 0.16), 0.72, 0.0)
 		canopy_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_add_cylinder(root, 2.2, 2.35, 0.22, Vector3(0.0, 0.11, 0.0), stone_mat, "StallDeck", 12)
+		_add_cylinder(root, 2.2, 2.35, 0.22, Vector3(0.0, 0.11, 0.0), make_stone_pbr_material(), "StallDeck", 12)
 		for p: Vector3 in [Vector3(-1.6, 1.6, -1.0), Vector3(1.6, 1.6, -1.0), Vector3(-1.6, 1.6, 1.0), Vector3(1.6, 1.6, 1.0)]:
 			_add_cylinder(root, 0.1, 0.12, 3.1, p, wood_mat, "Post", 8)
 		_add_cylinder(root, 0.1, 2.6, 1.1, Vector3(0.0, 3.55, 0.0), canopy_mat, "PavilionCanopy", 8)
@@ -1083,7 +1146,7 @@ static func build_dungeon_portal_visual(root: Node3D, theme: String) -> Node3D:
 	for child: Node in root.get_children():
 		child.queue_free()
 	var is_order: bool = (theme == "order")
-	var stone_mat: StandardMaterial3D = make_pbr_material(Color(0.32, 0.33, 0.38), 0.86, 0.08)
+	var stone_mat: StandardMaterial3D = make_stone_pbr_material(Color(0.72, 0.75, 0.82))
 	var portal_col: Color = Color(0.35, 0.82, 1.0) if is_order else Color(1.0, 0.26, 0.12)
 	var portal_mat: StandardMaterial3D = make_pbr_material(portal_col, 0.1, 0.1, portal_col, 3.0)
 	portal_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1103,7 +1166,7 @@ static func build_dungeon_portal_visual(root: Node3D, theme: String) -> Node3D:
 	return vortex
 
 
-# --- Player Buildings (Walls, Gates, Towers, Altars, Trade Posts) ---
+# --- Player Buildings (Walls, Gates, Towers, Houses, Storage Chests, Altars, Trade Posts) ---
 
 static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: bool = false, valid_ghost: bool = true) -> Dictionary:
 	for child: Node in root.get_children():
@@ -1111,7 +1174,7 @@ static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: b
 
 	var spec: Dictionary = GameConfig.BUILD_PIECES.get(piece_type, GameConfig.BUILD_PIECES["wall"]) as Dictionary
 	var base_col: Color = spec.get("color", Color(0.55, 0.55, 0.58)) as Color
-	var stone_mat: StandardMaterial3D = make_pbr_material(base_col, 0.85, 0.05)
+	var stone_mat: StandardMaterial3D = make_stone_pbr_material(base_col.lightened(0.35))
 	var wood_mat: StandardMaterial3D = make_pbr_material(Color(0.42, 0.28, 0.16), 0.8, 0.0)
 	var trim_mat: StandardMaterial3D = make_pbr_material(Color(0.32, 0.34, 0.38), 0.6, 0.4)
 
@@ -1131,17 +1194,26 @@ static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: b
 			_add_box(root, Vector3(1.0, 0.65, 1.35), Vector3(-2.25 + float(i) * 1.5, 4.5, 0.0), stone_mat, "Merlon_%d" % i)
 		_add_cylinder(root, 0.52, 0.68, 4.5, Vector3(-2.85, 2.25, 0.0), trim_mat, "EndTurretL", 10)
 		_add_cylinder(root, 0.52, 0.68, 4.5, Vector3(2.85, 2.25, 0.0), trim_mat, "EndTurretR", 10)
-	elif piece_type == "gate":
-		_add_cylinder(root, 0.85, 1.0, 5.1, Vector3(-2.3, 2.55, 0.0), stone_mat, "PillarL", 10)
-		_add_cylinder(root, 0.85, 1.0, 5.1, Vector3(2.3, 2.55, 0.0), stone_mat, "PillarR", 10)
-		_add_box(root, Vector3(5.6, 1.0, 1.45), Vector3(0.0, 4.55, 0.0), stone_mat, "ArchTop")
+	elif piece_type == "gate" or piece_type == "house_door":
+		var h_tall: float = 4.8 if piece_type == "gate" else 3.8
+		_add_cylinder(root, 0.65, 0.8, h_tall, Vector3(-2.3, h_tall * 0.5, 0.0), stone_mat, "PillarL", 10)
+		_add_cylinder(root, 0.65, 0.8, h_tall, Vector3(2.3, h_tall * 0.5, 0.0), stone_mat, "PillarR", 10)
+		_add_box(root, Vector3(5.6, 0.8, 1.1), Vector3(0.0, h_tall - 0.3, 0.0), stone_mat, "ArchTop")
 		door_pivot = Node3D.new()
 		door_pivot.name = "DoorPivot"
 		door_pivot.position = Vector3(-1.55, 0.0, 0.0)
 		root.add_child(door_pivot)
-		_add_box(door_pivot, Vector3(3.1, 3.9, 0.28), Vector3(1.55, 1.95, 0.0), wood_mat, "GateDoor")
-		_add_box(door_pivot, Vector3(3.15, 0.22, 0.34), Vector3(1.55, 1.1, 0.0), trim_mat, "IronBand1")
-		_add_box(door_pivot, Vector3(3.15, 0.22, 0.34), Vector3(1.55, 2.8, 0.0), trim_mat, "IronBand2")
+		_add_box(door_pivot, Vector3(3.1, h_tall - 0.7, 0.26), Vector3(1.55, (h_tall - 0.7) * 0.5, 0.0), wood_mat, "GateDoor")
+		_add_box(door_pivot, Vector3(3.15, 0.2, 0.32), Vector3(1.55, 1.1, 0.0), trim_mat, "IronBand1")
+	elif piece_type == "house_foundation":
+		_add_box(root, Vector3(6.0, 0.7, 6.0), Vector3(0.0, 0.35, 0.0), stone_mat, "FoundationSlab")
+	elif piece_type == "house_wall":
+		_add_box(root, Vector3(6.0, 3.8, 0.55), Vector3(0.0, 1.9, 0.0), wood_mat, "HouseTimberWall")
+		_add_box(root, Vector3(6.0, 0.9, 0.62), Vector3(0.0, 0.45, 0.0), stone_mat, "HouseStoneBase")
+	elif piece_type == "house_roof":
+		_add_prism(root, Vector3(6.4, 2.2, 6.4), Vector3(0.0, 1.1, 0.0), wood_mat, "PitchedRoof")
+	elif piece_type == "storage_chest":
+		build_loot_chest_visual(root)
 	elif piece_type == "tower":
 		_add_cylinder(root, 2.15, 2.55, 8.2, Vector3(0.0, 4.1, 0.0), stone_mat, "RoundTower", 14)
 		_add_cylinder(root, 2.65, 2.35, 0.8, Vector3(0.0, 8.4, 0.0), trim_mat, "TowerParapet", 14)
@@ -1168,7 +1240,7 @@ static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: b
 	return {"door_pivot": door_pivot, "sigil_node": sigil_node}
 
 
-# --- Sculpted Gatherable Resource Nodes (Wood, Iron Ore, Arcane Crystal, Alchemy Herb, Stone) ---
+# --- Sculpted Gatherable Resource Nodes ---
 
 static func build_resource_visual(root: Node3D, resource_type: String) -> void:
 	for child: Node in root.get_children():
@@ -1181,12 +1253,25 @@ static func build_resource_visual(root: Node3D, resource_type: String) -> void:
 		_add_sphere(root, 1.55, Vector3(0.0, 3.6, 0.0), leaf_mat, "Crown1", Vector3(1.1, 0.85, 1.1), 10)
 		_add_sphere(root, 1.15, Vector3(0.85, 3.2, 0.4), leaf_mat, "Crown2", Vector3(1.0, 0.85, 1.0), 10)
 		_add_sphere(root, 1.05, Vector3(-0.7, 4.4, -0.3), leaf_mat, "Crown3", Vector3(1.0, 0.85, 1.0), 10)
-	elif resource_type == "iron_ore":
+	elif resource_type == "iron_ore" or resource_type == "silver_ore" or resource_type == "gold_ore":
 		var rock_mat: StandardMaterial3D = make_pbr_material(Color(0.34, 0.35, 0.38), 0.82, 0.25)
-		var ore_mat: StandardMaterial3D = make_pbr_material(Color(0.68, 0.72, 0.78), 0.28, 0.88)
-		_add_sphere(root, 1.05, Vector3(0.0, 0.65, 0.0), rock_mat, "IronRock", Vector3(1.25, 0.85, 1.1), 10)
+		var vein_col: Color = Color(0.68, 0.72, 0.78)
+		var emit_e: float = 0.0
+		if resource_type == "silver_ore":
+			vein_col = Color(0.84, 0.9, 1.0)
+			emit_e = 0.8
+		elif resource_type == "gold_ore":
+			vein_col = Color(1.0, 0.82, 0.26)
+			emit_e = 1.4
+		var ore_mat: StandardMaterial3D = make_pbr_material(vein_col, 0.22, 0.92, vein_col, emit_e)
+		_add_sphere(root, 1.05, Vector3(0.0, 0.65, 0.0), rock_mat, "OreRock", Vector3(1.25, 0.85, 1.1), 10)
 		_add_prism(root, Vector3(0.45, 0.85, 0.45), Vector3(0.35, 1.0, 0.2), ore_mat, "Vein1", Vector3(16.0, 25.0, -18.0))
 		_add_prism(root, Vector3(0.38, 0.72, 0.38), Vector3(-0.42, 0.9, -0.18), ore_mat, "Vein2", Vector3(-18.0, -30.0, 22.0))
+	elif resource_type == "raw_meat":
+		var crate_mat: StandardMaterial3D = make_pbr_material(Color(0.58, 0.22, 0.18), 0.72, 0.05)
+		var bone_mat: StandardMaterial3D = make_pbr_material(Color(0.92, 0.88, 0.78), 0.65, 0.0)
+		_add_sphere(root, 0.62, Vector3(0.0, 0.55, 0.0), crate_mat, "GameRoast", Vector3(1.3, 0.75, 0.95), 10)
+		_add_cylinder(root, 0.12, 0.12, 1.25, Vector3(0.0, 0.55, 0.0), bone_mat, "Bone", 8, Vector3(0.0, 0.0, 90.0))
 	elif resource_type == "alchemy_herb":
 		var stem_mat: StandardMaterial3D = make_pbr_material(Color(0.16, 0.48, 0.22), 0.75, 0.0)
 		var bloom_mat: StandardMaterial3D = make_pbr_material(Color(0.35, 1.0, 0.68), 0.2, 0.0, Color(0.28, 0.95, 0.62), 2.4)
@@ -1197,11 +1282,10 @@ static func build_resource_visual(root: Node3D, resource_type: String) -> void:
 			_add_capsule(root, 0.07, 0.85, Vector3(sx, 0.42, sz), stem_mat, "Stem_%d" % i, Vector3(sin(ang) * 18.0, 0.0, -cos(ang) * 18.0))
 			_add_sphere(root, 0.16, Vector3(sx * 1.25, 0.88, sz * 1.25), bloom_mat, "Bloom_%d" % i)
 	elif resource_type == "stone":
-		var rock_mat: StandardMaterial3D = make_pbr_material(Color(0.46, 0.47, 0.5), 0.88, 0.05)
+		var rock_mat: StandardMaterial3D = make_stone_pbr_material(Color(0.82, 0.82, 0.85))
 		_add_sphere(root, 1.05, Vector3(0.0, 0.65, 0.0), rock_mat, "Boulder1", Vector3(1.25, 0.85, 1.15), 10)
 		_add_sphere(root, 0.72, Vector3(0.85, 0.45, 0.45), rock_mat, "Boulder2", Vector3(1.15, 0.8, 1.0), 10)
 	else:
-		# arcane_ore
 		var rock_mat: StandardMaterial3D = make_pbr_material(Color(0.22, 0.22, 0.28), 0.8, 0.15)
 		var crystal_mat: StandardMaterial3D = make_pbr_material(Color(0.32, 0.78, 1.0), 0.12, 0.3, Color(0.24, 0.68, 1.0), 2.8)
 		_add_sphere(root, 0.9, Vector3(0.0, 0.45, 0.0), rock_mat, "OreBase", Vector3(1.2, 0.65, 1.2), 10)

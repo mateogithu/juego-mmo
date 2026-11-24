@@ -1,8 +1,9 @@
 extends Node
 
-## Server-side atomic JSON database with automatic backup, plus lightweight client preferences.
-## Stores hashed user accounts, inventories, zero-P2W cosmetics, world structures,
-## player kingdoms/guilds, market listings, player bounties, and persistent Gracia Combativa timers.
+## Server-side atomic JSON database with rolling backup (Release 2.0).
+## Persists hashed accounts, levels (1..8000 / Infinity Admins), 5 races & 3D appearance,
+## 150-slot backpack, 4-piece armor sets, Dragon Mount item, hunger/wayshrines,
+## chunk-indexed buildings, persistent house Storage Chests, territorial war & 30-day Seasons.
 
 const DB_PATH: String = "user://server_database.json"
 const DB_TMP_PATH: String = "user://server_database.json.tmp"
@@ -46,13 +47,14 @@ func load_database() -> void:
 		data = loaded
 		_ensure_schema_fields()
 		_migrate_legacy_buildings_to_chunks()
+		_migrate_accounts_v2()
 		_seed_creator_avatars()
 	GameConfig.set_world_seed(int(data.get("world_seed", GameConfig.world_seed)))
-	print("[DatabaseManager] Database loaded (seed=%d, %d accounts, %d delta chunks, %d guilds)." % [
+	print("[DatabaseManager] DB v2.0 loaded (seed=%d, %d accounts, %d delta chunks, season #%d)." % [
 		GameConfig.world_seed,
 		(data["accounts"] as Dictionary).size(),
 		(data["chunk_deltas"] as Dictionary).size(),
-		(data["guilds"] as Dictionary).size()
+		int((data["season"] as Dictionary).get("number", 1))
 	])
 
 
@@ -62,13 +64,12 @@ func save_database() -> bool:
 	var json_text: String = JSON.stringify(data, "\t")
 	var tmp_file: FileAccess = FileAccess.open(DB_TMP_PATH, FileAccess.WRITE)
 	if tmp_file == null:
-		push_error("[DatabaseManager] Failed to open temp database file for writing.")
+		push_error("[DatabaseManager] Failed to open temp database file.")
 		return false
 	tmp_file.store_string(json_text)
 	tmp_file.flush()
 	tmp_file.close()
 
-	# Automatic rolling backup of previous valid database
 	if FileAccess.file_exists(DB_PATH):
 		var old_content: String = FileAccess.get_file_as_string(DB_PATH)
 		if not old_content.is_empty():
@@ -82,7 +83,6 @@ func save_database() -> bool:
 	var abs_dst: String = ProjectSettings.globalize_path(DB_PATH)
 	var err: Error = DirAccess.rename_absolute(abs_tmp, abs_dst)
 	if err != OK:
-		# Fallback direct write if rename across mounts is restricted
 		var direct: FileAccess = FileAccess.open(DB_PATH, FileAccess.WRITE)
 		if direct == null:
 			push_error("[DatabaseManager] Atomic rename and direct write failed: %d" % err)
@@ -114,6 +114,15 @@ func _try_read_json(path: String) -> Dictionary:
 
 func _create_empty_database() -> Dictionary:
 	var now: float = Time.get_unix_time_from_system()
+	var reg_scores: Dictionary = {}
+	for r: Dictionary in GameConfig.WORLD_REGIONS:
+		var rid: String = str(r["id"])
+		var def_own: String = str(r["default_owner"])
+		reg_scores[rid] = {
+			"order": 100 if def_own == GameConfig.PHILOSOPHY_ORDER else 0,
+			"chaos": 100 if def_own == GameConfig.PHILOSOPHY_CHAOS else 0,
+			"owner": def_own
+		}
 	return {
 		"version": GameConfig.PROTOCOL_VERSION,
 		"world_seed": GameConfig.world_seed,
@@ -123,9 +132,17 @@ func _create_empty_database() -> Dictionary:
 		"next_bounty_id": 1,
 		"accounts": {},
 		"chunk_deltas": {},
+		"storage_chests": {},
 		"guilds": {},
 		"market_listings": [],
 		"bounties": [],
+		"season": {
+			"number": 1,
+			"started_at_unix": now,
+			"ends_at_unix": now + GameConfig.SEASON_DURATION_SEC,
+			"last_winner": "Ninguna (Temporada 1 en curso)",
+			"region_scores": reg_scores
+		},
 		"combat_grace": {
 			"active_username": "",
 			"granted_at_unix": 0.0,
@@ -153,15 +170,59 @@ func _migrate_legacy_buildings_to_chunks() -> void:
 		mark_dirty()
 
 
+func _default_appearance(race_id: String = "HUMAN_VALLEY") -> Dictionary:
+	var rdef: Dictionary = GameConfig.RACES.get(race_id, GameConfig.RACES["HUMAN_VALLEY"]) as Dictionary
+	var sc: Color = rdef.get("default_skin", Color(0.86, 0.69, 0.56)) as Color
+	return {
+		"skin_color": sc.to_html(false),
+		"hair_color": "2c1e14",
+		"eye_color": "4ea8ff",
+		"armor_tint": "8a929e",
+		"hair_style": 0,
+		"beard_style": 0,
+		"hide_helmet": false
+	}
+
+
+func _migrate_accounts_v2() -> void:
+	var accounts: Dictionary = data["accounts"] as Dictionary
+	for k_var: Variant in accounts.keys():
+		var acc: Dictionary = accounts[k_var] as Dictionary
+		if not acc.has("level"):
+			acc["level"] = 1
+		if not acc.has("xp"):
+			acc["xp"] = 0
+		if not acc.has("race_id"):
+			acc["race_id"] = "HUMAN_VALLEY"
+		if not acc.has("appearance"):
+			acc["appearance"] = _default_appearance(str(acc["race_id"]))
+		if not acc.has("alignment_score"):
+			acc["alignment_score"] = 0
+		if not acc.has("hunger"):
+			acc["hunger"] = 100.0
+		if not acc.has("food_buff"):
+			acc["food_buff"] = ""
+		if not acc.has("food_buff_until"):
+			acc["food_buff_until"] = 0.0
+		if not acc.has("discovered_wayshrines"):
+			acc["discovered_wayshrines"] = ["ws_alba", "ws_caos"]
+		for slot_key: String in ["equipped_helmet", "equipped_chest", "equipped_legs", "equipped_boots", "equipped_weapon"]:
+			if not acc.has(slot_key):
+				acc[slot_key] = ""
+
+
 func _seed_creator_avatars() -> void:
 	var accounts: Dictionary = data["accounts"] as Dictionary
 	if not accounts.has("avatarorden"):
-		var res_o: Dictionary = register_account("AvatarOrden", "orden_creador", "ARCANE_KNIGHT", GameConfig.ROLE_AVATAR_ORDEN)
+		var res_o: Dictionary = register_account("AvatarOrden", "orden_creador", "ARCANE_KNIGHT", GameConfig.ROLE_AVATAR_ORDEN, "ASTRAL_ELF", _default_appearance("ASTRAL_ELF"))
 		if bool(res_o.get("ok", false)):
 			var acc_o: Dictionary = accounts["avatarorden"] as Dictionary
 			acc_o["philosophy"] = GameConfig.PHILOSOPHY_ORDER
-			acc_o["crowns"] = 99999
+			acc_o["alignment_score"] = 100
+			acc_o["crowns"] = 999999
 			acc_o["gold"] = 50000
+			var inv_o: Dictionary = acc_o["inventory"] as Dictionary
+			inv_o["dragon_mount_stone"] = 1
 			var cos_o: Dictionary = acc_o["cosmetics"] as Dictionary
 			cos_o["owned_armors"] = ["default_iron", "order_paladin_gold", "astral_silver", "royal_crimson", "chaos_obsidian"]
 			cos_o["owned_dragons"] = ["crimson_wyrm", "celestial_white", "azure_drake", "emerald_ancient", "abyssal_black"]
@@ -171,12 +232,15 @@ func _seed_creator_avatars() -> void:
 			cos_o["equipped_trail"] = "golden_order"
 
 	if not accounts.has("avatarcaos"):
-		var res_c: Dictionary = register_account("AvatarCaos", "caos_creador", "PYROMANCER", GameConfig.ROLE_AVATAR_CAOS)
+		var res_c: Dictionary = register_account("AvatarCaos", "caos_creador", "PYROMANCER", GameConfig.ROLE_AVATAR_CAOS, "DRACONID", _default_appearance("DRACONID"))
 		if bool(res_c.get("ok", false)):
 			var acc_c: Dictionary = accounts["avatarcaos"] as Dictionary
 			acc_c["philosophy"] = GameConfig.PHILOSOPHY_CHAOS
-			acc_c["crowns"] = 99999
+			acc_c["alignment_score"] = -100
+			acc_c["crowns"] = 999999
 			acc_c["gold"] = 50000
+			var inv_c: Dictionary = acc_c["inventory"] as Dictionary
+			inv_c["dragon_mount_stone"] = 1
 			var cos_c: Dictionary = acc_c["cosmetics"] as Dictionary
 			cos_c["owned_armors"] = ["default_iron", "chaos_obsidian", "royal_crimson", "astral_silver", "order_paladin_gold"]
 			cos_c["owned_dragons"] = ["crimson_wyrm", "abyssal_black", "azure_drake", "emerald_ancient", "celestial_white"]
@@ -187,6 +251,10 @@ func _seed_creator_avatars() -> void:
 
 
 func _hash_password(password: String, salt: String) -> String:
+	return (salt + "::" + password + "::cronicas_mmo_v2").sha256_text()
+
+
+func _hash_password_v1(password: String, salt: String) -> String:
 	return (salt + "::" + password + "::cronicas_mmo_v1").sha256_text()
 
 
@@ -196,7 +264,14 @@ func _generate_salt(username: String) -> String:
 	return ("%s_%d_%d" % [username, Time.get_ticks_usec(), rng.randi()]).sha256_text().substr(0, 16)
 
 
-func register_account(username: String, password: String, class_id: String, role: String = GameConfig.ROLE_PLAYER) -> Dictionary:
+func register_account(
+	username: String,
+	password: String,
+	class_id: String,
+	role: String = GameConfig.ROLE_PLAYER,
+	race_id: String = "HUMAN_VALLEY",
+	appearance: Dictionary = {}
+) -> Dictionary:
 	var clean_user: String = username.strip_edges()
 	if clean_user.length() < 3 or clean_user.length() > 20:
 		return {"ok": false, "error": "El nombre debe tener entre 3 y 20 caracteres."}
@@ -209,10 +284,16 @@ func register_account(username: String, password: String, class_id: String, role
 		return {"ok": false, "error": "Ya existe una cuenta con ese nombre."}
 
 	var valid_class: String = class_id if GameConfig.CLASSES.has(class_id) else "ARCANE_KNIGHT"
+	var valid_race: String = race_id if GameConfig.RACES.has(race_id) else "HUMAN_VALLEY"
+	var final_app: Dictionary = _default_appearance(valid_race)
+	for ak: Variant in appearance.keys():
+		final_app[ak] = appearance[ak]
+
 	var salt: String = _generate_salt(clean_user)
 	var pw_hash: String = _hash_password(password, salt)
-	var spawn_x: float = randf_range(-10.0, 10.0)
-	var spawn_z: float = randf_range(-10.0, 10.0)
+	# Spawn safely inside Santuario del Alba (0, 0)
+	var spawn_x: float = randf_range(-8.0, 8.0)
+	var spawn_z: float = randf_range(-8.0, 8.0)
 	var spawn_y: float = GameConfig.sample_terrain_height(spawn_x, spawn_z) + 1.5
 
 	var profile: Dictionary = {
@@ -220,20 +301,32 @@ func register_account(username: String, password: String, class_id: String, role
 		"salt": salt,
 		"password_hash": pw_hash,
 		"role": role,
+		"level": 1,
+		"xp": 0,
 		"class_id": valid_class,
+		"race_id": valid_race,
+		"appearance": final_app,
 		"philosophy": GameConfig.PHILOSOPHY_NEUTRAL,
+		"alignment_score": 0,
 		"guild_id": "",
-		"gold": 150,
+		"gold": 50,
 		"crowns": 1000,
+		"hunger": 100.0,
+		"food_buff": "",
+		"food_buff_until": 0.0,
+		"discovered_wayshrines": ["ws_alba", "ws_caos"],
 		"inventory": {
-			"wood": 30,
-			"stone": 30,
-			"arcane_ore": 12,
-			"health_potion": 3,
-			"mana_potion": 2
+			"wood": 20,
+			"stone": 20,
+			"iron_ore": 10,
+			"traveler_bread": 3,
+			"health_potion": 2
 		},
 		"equipped_weapon": "",
-		"equipped_armor_item": "",
+		"equipped_helmet": "",
+		"equipped_chest": "",
+		"equipped_legs": "",
+		"equipped_boots": "",
 		"cosmetics": {
 			"owned_armors": ["default_iron"],
 			"owned_dragons": ["crimson_wyrm"],
@@ -261,7 +354,7 @@ func authenticate_account(username: String, password: String) -> Dictionary:
 	var acc: Dictionary = accounts[key] as Dictionary
 	var expected: String = str(acc.get("password_hash", ""))
 	var salt: String = str(acc.get("salt", ""))
-	if _hash_password(password, salt) != expected:
+	if _hash_password(password, salt) != expected and _hash_password_v1(password, salt) != expected:
 		return {"ok": false, "error": "Contraseña incorrecta."}
 	return {"ok": true, "profile": get_sanitized_profile(key)}
 
@@ -281,6 +374,8 @@ func get_sanitized_profile(username_or_key: String) -> Dictionary:
 	var copy: Dictionary = acc.duplicate(true)
 	copy.erase("password_hash")
 	copy.erase("salt")
+	copy["backpack_used"] = get_backpack_used_slots(username_or_key)
+	copy["backpack_max"] = -1 if GameConfig.is_avatar_role(str(acc.get("role", ""))) else GameConfig.BACKPACK_MAX_SLOTS
 	return copy
 
 
@@ -292,15 +387,36 @@ func update_player_position(username: String, pos: Vector3) -> void:
 	mark_dirty()
 
 
-func add_item(username: String, item_id: String, qty: int) -> bool:
+# --- 150-Slot Backpack Management (Unlimited for AvatarOrden & AvatarCaos) ---
+
+func get_backpack_used_slots(username: String) -> int:
+	var acc: Dictionary = get_account_mutable(username)
+	if acc.is_empty():
+		return 0
+	var inv: Dictionary = acc.get("inventory", {}) as Dictionary
+	var total: int = 0
+	for k_var: Variant in inv.keys():
+		total += maxi(0, int(inv[k_var]))
+	return total
+
+
+func can_add_item(username: String, item_id: String, qty: int) -> bool:
 	if qty <= 0 or not GameConfig.ITEMS.has(item_id):
 		return false
 	var acc: Dictionary = get_account_mutable(username)
 	if acc.is_empty():
 		return false
+	if GameConfig.is_avatar_role(str(acc.get("role", ""))):
+		return true
+	return get_backpack_used_slots(username) + qty <= GameConfig.BACKPACK_MAX_SLOTS
+
+
+func add_item(username: String, item_id: String, qty: int) -> bool:
+	if not can_add_item(username, item_id, qty):
+		return false
+	var acc: Dictionary = get_account_mutable(username)
 	var inv: Dictionary = acc["inventory"] as Dictionary
-	var current: int = int(inv.get(item_id, 0))
-	inv[item_id] = current + qty
+	inv[item_id] = int(inv.get(item_id, 0)) + qty
 	mark_dirty()
 	return true
 
@@ -330,8 +446,7 @@ func has_items(username: String, costs: Dictionary) -> bool:
 		return false
 	var inv: Dictionary = acc["inventory"] as Dictionary
 	for item_id: Variant in costs.keys():
-		var req: int = int(costs[item_id])
-		if int(inv.get(str(item_id), 0)) < req:
+		if int(inv.get(str(item_id), 0)) < int(costs[item_id]):
 			return false
 	return true
 
@@ -343,6 +458,37 @@ func consume_items(username: String, costs: Dictionary) -> bool:
 		remove_item(username, str(item_id), int(costs[item_id]))
 	return true
 
+
+# --- Persistent House Storage Chests ---
+
+func get_chest_inventory(building_id: int) -> Dictionary:
+	var chests: Dictionary = data["storage_chests"] as Dictionary
+	var key: String = str(building_id)
+	if not chests.has(key):
+		chests[key] = {}
+	return chests[key] as Dictionary
+
+
+func get_chest_used_slots(building_id: int) -> int:
+	var cinv: Dictionary = get_chest_inventory(building_id)
+	var total: int = 0
+	for k_var: Variant in cinv.keys():
+		total += maxi(0, int(cinv[k_var]))
+	return total
+
+
+func remove_chest_inventory(building_id: int) -> Dictionary:
+	var chests: Dictionary = data["storage_chests"] as Dictionary
+	var key: String = str(building_id)
+	if chests.has(key):
+		var copy: Dictionary = (chests[key] as Dictionary).duplicate(true)
+		chests.erase(key)
+		mark_dirty()
+		return copy
+	return {}
+
+
+# --- Chunk-Indexed Deltas & Monthly Season Reset ---
 
 func allocate_building_id() -> int:
 	var next_id: int = int(data.get("next_building_id", 1))
@@ -361,11 +507,7 @@ func allocate_loot_id() -> int:
 func _get_or_create_chunk_delta(ckey: String) -> Dictionary:
 	var deltas: Dictionary = data["chunk_deltas"] as Dictionary
 	if not deltas.has(ckey):
-		deltas[ckey] = {
-			"buildings": [],
-			"destroyed_ids": [],
-			"loot_chests": []
-		}
+		deltas[ckey] = {"buildings": [], "destroyed_ids": [], "loot_chests": []}
 	return deltas[ckey] as Dictionary
 
 
@@ -374,18 +516,9 @@ func get_buildings() -> Array:
 	var deltas: Dictionary = data["chunk_deltas"] as Dictionary
 	for ckey_var: Variant in deltas.keys():
 		var bucket: Dictionary = deltas[ckey_var] as Dictionary
-		var blist: Array = bucket.get("buildings", []) as Array
-		for rec_var: Variant in blist:
+		for rec_var: Variant in (bucket.get("buildings", []) as Array):
 			out.append(rec_var)
 	return out
-
-
-func get_chunk_buildings(coord: Vector2i) -> Array:
-	var deltas: Dictionary = data["chunk_deltas"] as Dictionary
-	var ckey: String = GameConfig.chunk_key(coord)
-	if not deltas.has(ckey):
-		return []
-	return ((deltas[ckey] as Dictionary).get("buildings", []) as Array).duplicate(true)
 
 
 func add_building_record(record: Dictionary) -> void:
@@ -424,8 +557,7 @@ func get_all_loot_records() -> Array:
 	var deltas: Dictionary = data["chunk_deltas"] as Dictionary
 	for ckey_var: Variant in deltas.keys():
 		var bucket: Dictionary = deltas[ckey_var] as Dictionary
-		var llist: Array = bucket.get("loot_chests", []) as Array
-		for rec_var: Variant in llist:
+		for rec_var: Variant in (bucket.get("loot_chests", []) as Array):
 			out.append(rec_var)
 	return out
 
@@ -458,6 +590,61 @@ func remove_loot_record(loot_id: int, chunk_key_hint: String = "") -> void:
 				return
 
 
+## Monthly Season Reset: clears ONLY territorial buildings & region scores while keeping
+## ALL player levels, 150-slot backpacks, equipment, gold, cosmetics, and dragons intact!
+func reset_territorial_map_for_new_season(winner_faction: String) -> void:
+	var deltas: Dictionary = data["chunk_deltas"] as Dictionary
+	for ckey_var: Variant in deltas.keys():
+		var bucket: Dictionary = deltas[ckey_var] as Dictionary
+		var kept_buildings: Array = []
+		# Return items stored inside house chests safely to owners if space allows, or clear territorial cities
+		for b_var: Variant in (bucket.get("buildings", []) as Array):
+			var brec: Dictionary = b_var as Dictionary
+			if str(brec.get("piece_type", "")) == "storage_chest":
+				var cid: int = int(brec.get("id", -1))
+				var owner_u: String = str(brec.get("owner", ""))
+				var chest_items: Dictionary = remove_chest_inventory(cid)
+				var owner_acc: Dictionary = get_account_mutable(owner_u)
+				if not owner_acc.is_empty():
+					var inv: Dictionary = owner_acc["inventory"] as Dictionary
+					for iid_var: Variant in chest_items.keys():
+						inv[str(iid_var)] = int(inv.get(str(iid_var), 0)) + int(chest_items[iid_var])
+		bucket["buildings"] = kept_buildings
+		bucket["destroyed_ids"] = []
+
+	var now: float = Time.get_unix_time_from_system()
+	var season: Dictionary = data["season"] as Dictionary
+	var next_num: int = int(season.get("number", 1)) + 1
+	var reg_scores: Dictionary = {}
+	for r: Dictionary in GameConfig.WORLD_REGIONS:
+		var rid: String = str(r["id"])
+		var def_own: String = str(r["default_owner"])
+		reg_scores[rid] = {
+			"order": 100 if def_own == GameConfig.PHILOSOPHY_ORDER else 0,
+			"chaos": 100 if def_own == GameConfig.PHILOSOPHY_CHAOS else 0,
+			"owner": def_own
+		}
+	data["season"] = {
+		"number": next_num,
+		"started_at_unix": now,
+		"ends_at_unix": now + GameConfig.SEASON_DURATION_SEC,
+		"last_winner": winner_faction,
+		"region_scores": reg_scores
+	}
+	# Reward cosmetic crowns to members of the winning faction
+	var accounts: Dictionary = data["accounts"] as Dictionary
+	for ak_var: Variant in accounts.keys():
+		var acc: Dictionary = accounts[ak_var] as Dictionary
+		if str(acc.get("philosophy", "")) == winner_faction:
+			acc["crowns"] = int(acc.get("crowns", 0)) + 500
+	mark_dirty()
+	save_database()
+
+
+func get_season_state() -> Dictionary:
+	return data["season"] as Dictionary
+
+
 func get_combat_grace_state() -> Dictionary:
 	return data["combat_grace"] as Dictionary
 
@@ -479,8 +666,6 @@ func get_market_listings() -> Array:
 func get_bounties() -> Array:
 	return data["bounties"] as Array
 
-
-# --- Client-side local preferences (IntroLore first-account check & last login info) ---
 
 func load_client_prefs() -> void:
 	var loaded: Dictionary = _try_read_json(CLIENT_PREFS_PATH)

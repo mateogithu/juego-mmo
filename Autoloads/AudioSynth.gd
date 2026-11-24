@@ -219,3 +219,42 @@ func play_wing_flap() -> void:
 		var s: float = clampf((lp * 1.1 + bass) * env * 0.65, -1.0, 1.0)
 		samples[i] = Vector2(s, s)
 	_play_samples(samples, -8.0)
+
+
+func play_thunder() -> void:
+	if not _enabled:
+		return
+	var duration: float = 1.15
+	var total: int = int(duration * MIX_RATE)
+	var samples: PackedVector2Array = PackedVector2Array()
+	samples.resize(total)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.seed = Time.get_ticks_usec()
+	var lp: float = 0.0
+	for i: int in range(total):
+		var t: float = float(i) / MIX_RATE
+		var crack: float = exp(-t * 16.0) * rng.randf_range(-1.0, 1.0) * 0.9
+		var rumble_env: float = clampf(t / 0.08, 0.0, 1.0) * exp(-t * 2.1)
+		lp = lerpf(lp, rng.randf_range(-1.0, 1.0), 0.045)
+		var sub: float = sin(TAU * (48.0 - t * 14.0) * t) * 0.45
+		var s: float = clampf((crack + (lp * 1.9 + sub) * rumble_env), -1.0, 1.0)
+		samples[i] = Vector2(s, s)
+	_play_samples(samples, -2.5)
+
+
+func play_pvp_warning() -> void:
+	if not _enabled:
+		return
+	var duration: float = 0.72
+	var total: int = int(duration * MIX_RATE)
+	var samples: PackedVector2Array = PackedVector2Array()
+	samples.resize(total)
+	for i: int in range(total):
+		var t: float = float(i) / MIX_RATE
+		var env: float = clampf(t / 0.05, 0.0, 1.0) * exp(-t * 2.8)
+		var horn1: float = sin(TAU * 146.83 * t) * 0.55 + sin(TAU * 293.66 * t) * 0.25
+		var horn2: float = sin(TAU * 155.56 * t) * 0.35 # Tense minor second war horn
+		var s: float = clampf(tanh((horn1 + horn2) * 1.6) * env * 0.7, -1.0, 1.0)
+		samples[i] = Vector2(s, s)
+	_play_samples(samples, -4.5)
+

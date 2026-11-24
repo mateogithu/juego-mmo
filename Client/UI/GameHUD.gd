@@ -1,9 +1,13 @@
 class_name GameHUD
 extends CanvasLayer
 
-## Full MMORPG HUD: Vitals (HP/Shield/Mana/Stamina), 4 Class Abilities, Global Gracia Combativa
-## live countdown, Dragon Flight status, Chat, Building Menu (B), Inventory/Crafting/Market (I),
-## Zero-P2W Cosmetic Shop (T), Kingdoms/Guilds & Player Bounties (Tab), and Creator Avatar Console (F1).
+## Full MMORPG HUD (Release 2.0):
+## - Safe Zone (Green) vs Open PvP Conquest (Red) zone pill + dramatic frontier crossing banner
+## - Levels 1-8000 / Infinity badge, HP/Shield, Mana, Stamina, Hunger (Saciedad) bars
+## - Corner Minimap + Interactive 5-Region World Map (M) with Wayshrine fast travel
+## - 150-Slot Backpack + 4-Piece Armor Set tags + Campfire/Forge/Alchemy Crafting + 100% Player Market
+## - Lockable 60-Slot Storage Chest modal + Direct P2P Trade + 4-Player Party HUD/Invite
+## - Free Cosmetics for Creator Avatars + F1 Console (Disguised Novice Lv 1, Faction Grace, Season Reset)
 
 var local_player: PlayerController = null
 var _world_auth: WorldAuthority = null
@@ -14,9 +18,12 @@ var _online_roster: Array[String] = []
 var _active_panel: Control = null
 var _banner_timer: float = 0.0
 
-# Core HUD widgets
 @onready var root_control: Control = $RootControl
 var _grace_label: Label = null
+var _zone_pill: PanelContainer = null
+var _zone_pill_lbl: Label = null
+var _minimap_canvas: Control = null
+var _party_hud_lbl: Label = null
 var _boss_bar_box: PanelContainer = null
 var _boss_name_lbl: Label = null
 var _boss_hp_bar: ProgressBar = null
@@ -30,9 +37,11 @@ var _player_title: Label = null
 var _hp_bar: ProgressBar = null
 var _mana_bar: ProgressBar = null
 var _stamina_bar: ProgressBar = null
+var _hunger_bar: ProgressBar = null
 var _hp_text: Label = null
 var _mana_text: Label = null
 var _stamina_text: Label = null
+var _hunger_text: Label = null
 var _dragon_status_lbl: Label = null
 var _currency_lbl: Label = null
 var _coords_lbl: Label = null
@@ -49,18 +58,32 @@ var _build_info_lbl: Label = null
 
 # Modal Panels
 var _inv_panel: PanelContainer = null
+var _inv_slots_lbl: Label = null
 var _inv_list_box: VBoxContainer = null
 var _craft_list_box: VBoxContainer = null
 var _market_list_box: VBoxContainer = null
 var _market_item_opt: OptionButton = null
 var _market_qty_spin: SpinBox = null
 var _market_price_spin: SpinBox = null
+var _trade_target_in: LineEdit = null
+var _trade_status_lbl: Label = null
+
+var _chest_panel: PanelContainer = null
+var _chest_title_lbl: Label = null
+var _chest_bag_box: VBoxContainer = null
+var _chest_box: VBoxContainer = null
+var _open_chest_id: int = -1
+var _open_chest_items: Dictionary = {}
+
+var _world_map_ui: WorldMapUI = null
 
 var _shop_panel: PanelContainer = null
 var _shop_crowns_lbl: Label = null
 var _shop_list_box: VBoxContainer = null
 
 var _guilds_panel: PanelContainer = null
+var _party_invite_in: LineEdit = null
+var _party_list_lbl: Label = null
 var _guild_name_in: LineEdit = null
 var _guild_phil_opt: OptionButton = null
 var _guild_manif_in: LineEdit = null
@@ -113,22 +136,96 @@ func _connect_signals() -> void:
 	NetworkManager.chat_message_received.connect(_on_chat_received)
 	NetworkManager.system_banner_received.connect(_on_banner_received)
 	NetworkManager.social_data_updated.connect(_on_social_updated)
+	NetworkManager.season_data_updated.connect(_on_season_updated)
+	NetworkManager.party_updated.connect(_on_party_updated)
+	NetworkManager.trade_updated.connect(_on_trade_updated)
+	NetworkManager.chest_opened.connect(_on_chest_opened)
 	NetworkManager.disconnected_from_server.connect(_on_disconnected)
 
 
 func _on_local_player_ready(pc: PlayerController) -> void:
 	local_player = pc
+	if not pc.zone_status_changed.is_connected(_on_zone_status_changed):
+		pc.zone_status_changed.connect(_on_zone_status_changed)
+	var wp: Vector3 = GameConfig.local_to_world(pc.global_position)
+	_update_zone_pill(SafeZone.is_in_safe_zone(wp), SafeZone.get_safe_zone_name(wp))
 	_update_ability_slot_names()
 	_refresh_all_panels()
 
 
+func _on_zone_status_changed(in_safe: bool, zname: String) -> void:
+	_update_zone_pill(in_safe, zname)
+	if in_safe:
+		_on_banner_received("🛡️ HAS ENTRADO EN ZONA SEGURA", "%s — Combate PvP y robos 100%% bloqueados." % zname, "#66f2a2")
+	else:
+		_on_banner_received("⚔️ HAS ENTRADO EN ZONA PVP Y CONQUISTA", "¡Sin reglas ni piedad! Defendé tu botín y tu dragón con tu vida.", "#ff4a3a")
+
+
+func _update_zone_pill(in_safe: bool, zname: String) -> void:
+	if _zone_pill == null or _zone_pill_lbl == null:
+		return
+	if in_safe:
+		_zone_pill.add_theme_stylebox_override("panel", _make_style(Color(0.06, 0.22, 0.12, 0.9), Color(0.32, 0.95, 0.52, 0.95)))
+		_zone_pill_lbl.text = "🛡️ ZONA SEGURA: %s" % zname
+		_zone_pill_lbl.add_theme_color_override("font_color", Color(0.65, 1.0, 0.78))
+	else:
+		_zone_pill.add_theme_stylebox_override("panel", _make_style(Color(0.24, 0.05, 0.05, 0.9), Color(1.0, 0.28, 0.22, 0.95)))
+		_zone_pill_lbl.text = "⚔️ ZONA PVP Y CONQUISTA (BOTÍN TOTAL)"
+		_zone_pill_lbl.add_theme_color_override("font_color", Color(1.0, 0.65, 0.6))
+
+
 func _on_profile_updated(_profile: Dictionary) -> void:
 	_refresh_all_panels()
+	if _chest_panel != null and _chest_panel.visible:
+		_refresh_chest_panel()
 
 
 func _on_social_updated(_g: Dictionary, _l: Array, _b: Array) -> void:
 	_refresh_guilds_panel()
 	_refresh_inventory_panel()
+
+
+func _on_season_updated(_s: Dictionary) -> void:
+	if _world_map_ui != null and _world_map_ui.visible:
+		_refresh_world_map()
+
+
+func _on_party_updated(members: Array) -> void:
+	if _party_hud_lbl != null:
+		if members.is_empty():
+			_party_hud_lbl.text = "Grupo (Tab): Solo (4 jug. para Mazmorras)"
+		else:
+			var parts: Array[String] = []
+			for m_var: Variant in members:
+				var m: Dictionary = m_var as Dictionary
+				var badge: String = LevelingSystem.format_level_badge(int(m.get("level", 1)), str(m.get("role", GameConfig.ROLE_PLAYER)))
+				parts.append("%s %s" % [badge, str(m.get("username", ""))])
+			_party_hud_lbl.text = "Grupo (%d/4): %s" % [members.size(), ", ".join(parts)]
+	if _party_list_lbl != null:
+		_party_list_lbl.text = _party_hud_lbl.text if _party_hud_lbl != null else ""
+
+
+func _on_trade_updated(sess: Dictionary) -> void:
+	if _trade_status_lbl == null:
+		return
+	if sess.is_empty():
+		_trade_status_lbl.text = "Trueque Directo: Sin sesión activa."
+	else:
+		_trade_status_lbl.text = "Trueque con %s / %s — Oro A:%d B:%d | Confirmado A:%s B:%s" % [
+			str(sess.get("name_a", "")), str(sess.get("name_b", "")),
+			int(sess.get("gold_a", 0)), int(sess.get("gold_b", 0)),
+			"Sí" if bool(sess.get("confirm_a", false)) else "No",
+			"Sí" if bool(sess.get("confirm_b", false)) else "No"
+		]
+
+
+func _on_chest_opened(building_id: int, owner_name: String, items: Dictionary) -> void:
+	_open_chest_id = building_id
+	_open_chest_items = items
+	if _chest_title_lbl != null:
+		_chest_title_lbl.text = "Cajón de Guardado de %s (%d / 60 espacios)" % [owner_name, items.size()]
+	_refresh_chest_panel()
+	_toggle_panel(_chest_panel)
 
 
 func _on_roster_updated(names: PackedStringArray) -> void:
@@ -196,7 +293,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			_toggle_panel(_pause_panel)
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("toggle_map"):
+		open_world_map()
+		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("toggle_inventory"):
+		_station_filter = ""
 		_toggle_panel(_inv_panel)
 		_refresh_inventory_panel()
 		get_viewport().set_input_as_handled()
@@ -211,6 +312,24 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("toggle_avatar_console"):
 		_toggle_panel(_avatar_panel)
 		get_viewport().set_input_as_handled()
+
+
+func open_world_map() -> void:
+	if _world_map_ui == null:
+		return
+	if _active_panel == _world_map_ui:
+		_close_all_panels()
+	else:
+		_refresh_world_map()
+		_toggle_panel(_world_map_ui)
+
+
+func _refresh_world_map() -> void:
+	if _world_map_ui == null:
+		return
+	var wp: Vector3 = GameConfig.local_to_world(local_player.global_position) if local_player != null else Vector3.ZERO
+	var discovered: Array = NetworkManager.local_profile.get("discovered_wayshrines", ["ws_alba", "ws_caos"]) as Array
+	_world_map_ui.refresh_map(wp, NetworkManager.cached_season, discovered, true)
 
 
 func open_trade_market() -> void:
@@ -254,7 +373,7 @@ func _toggle_panel(panel: Control) -> void:
 
 
 func _close_all_panels() -> void:
-	for p: Control in [_inv_panel, _shop_panel, _guilds_panel, _avatar_panel, _pause_panel]:
+	for p: Control in [_inv_panel, _chest_panel, _world_map_ui, _shop_panel, _guilds_panel, _avatar_panel, _pause_panel]:
 		if p != null:
 			p.visible = false
 	_active_panel = null
@@ -270,7 +389,7 @@ func _process(delta: float) -> void:
 			var blessed: String = str(_grace_state.get("active_username", "Ninguno"))
 			var online: Array[String] = NetworkManager.get_connected_usernames()
 			_server_monitor_lbl.text = (
-				"SERVIDOR DEDICADO ACTIVO — %s\n"
+				"SERVIDOR DEDICADO ACTIVO — %s (v2.0)\n"
 				+ "Jugadores Conectados: %d (%s)\n"
 				+ "Gracia Combativa Hoy: %s\n"
 				+ "Base de Datos: user://server_database.json"
@@ -285,13 +404,15 @@ func _process(delta: float) -> void:
 	_update_combat_grace_banner()
 	_update_boss_bar_ui()
 	_update_player_vitals_ui()
+	if _minimap_canvas != null:
+		_minimap_canvas.queue_redraw()
 
 
 func _update_boss_bar_ui() -> void:
 	if _boss_bar_box == null or local_player == null:
 		return
 	var best_boss: WorldBoss = null
-	var best_dist: float = 65.0
+	var best_dist: float = 75.0
 	for node: Node in get_tree().get_nodes_in_group("world_bosses"):
 		var wb: WorldBoss = node as WorldBoss
 		if not wb.is_alive:
@@ -304,7 +425,7 @@ func _update_boss_bar_ui() -> void:
 		_boss_bar_box.visible = false
 		return
 	_boss_bar_box.visible = true
-	_boss_name_lbl.text = "☠ %s — %s ☠" % [best_boss.boss_name, best_boss.boss_title]
+	_boss_name_lbl.text = "🐉 %s — %s" % [best_boss.boss_name, best_boss.boss_title]
 	_boss_hp_bar.max_value = best_boss.max_hp
 	_boss_hp_bar.value = best_boss.hp
 	_boss_hp_lbl.text = "%d / %d HP" % [int(ceilf(best_boss.hp)), int(best_boss.max_hp)]
@@ -317,13 +438,15 @@ func _update_combat_grace_banner() -> void:
 	var active_user: String = str(_grace_state.get("active_username", ""))
 	var expires_at: float = float(_grace_state.get("expires_at_unix", 0.0))
 	var next_roll: float = float(_grace_state.get("next_roll_at_unix", 0.0))
+	var s_num: int = int(NetworkManager.cached_season.get("season_number", 1))
+	var s_days: int = SeasonResetSystem.get_days_remaining(NetworkManager.cached_season) if not NetworkManager.cached_season.is_empty() else 30
 	if not active_user.is_empty() and now < expires_at:
 		var rem: String = GameConfig.format_duration(expires_at - now)
-		_grace_label.text = "★ GRACIA COMBATIVA (+100%% STATS): %s  |  Tiempo restante: %s ★" % [active_user, rem]
+		_grace_label.text = "★ GRACIA COMBATIVA (x2): %s (%s) | Temp. %d (%d d) ★" % [active_user, rem, s_num, s_days]
 		_grace_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.35))
 	else:
 		var until: String = GameConfig.format_duration(maxf(0.0, next_roll - now))
-		_grace_label.text = "Gracia Combativa: Ningún mortal bendecido aún  |  Próximo descenso solar: %s" % until
+		_grace_label.text = "Próximo Descenso: %s | Temporada %d (%d días restantes)" % [until, s_num, s_days]
 		_grace_label.add_theme_color_override("font_color", Color(0.82, 0.86, 0.94))
 
 
@@ -331,40 +454,48 @@ func _update_player_vitals_ui() -> void:
 	if local_player == null:
 		return
 	var class_name_str: String = str((GameConfig.CLASSES.get(local_player.class_id, {}) as Dictionary).get("name", local_player.class_id))
-	_player_title.text = "%s — %s [%s]" % [local_player.username, class_name_str, local_player.philosophy]
+	var lvl_badge: String = LevelingSystem.format_level_badge(local_player.level, local_player.role, local_player.disguised_novice)
+	_player_title.text = "%s %s — %s [%s]" % [lvl_badge, local_player.username, class_name_str, local_player.philosophy]
+
 	_hp_bar.max_value = local_player.max_hp
 	_hp_bar.value = local_player.hp
 	var sh_str: String = " (+%d Escudo)" % int(local_player.shield_hp) if local_player.shield_hp > 1.0 else ""
 	_hp_text.text = "HP: %d / %d%s" % [int(ceilf(local_player.hp)), int(local_player.max_hp), sh_str]
 
+	var is_inf: bool = GameConfig.is_avatar_role(local_player.role) and not local_player.disguised_novice
 	_mana_bar.max_value = local_player.max_mana
 	_mana_bar.value = local_player.mana
-	_mana_text.text = "Maná: %d / %d" % [int(local_player.mana), int(local_player.max_mana)]
+	_mana_text.text = "Maná: ♾️ ILIMITADO" if is_inf else "Maná: %d / %d" % [int(local_player.mana), int(local_player.max_mana)]
 
 	_stamina_bar.max_value = local_player.max_stamina
 	_stamina_bar.value = local_player.stamina
-	_stamina_text.text = "Estamina: %d / %d" % [int(local_player.stamina), int(local_player.max_stamina)]
+	_stamina_text.text = "Estamina: ♾️ ILIMITADA" if is_inf else "Estamina: %d / %d" % [int(local_player.stamina), int(local_player.max_stamina)]
+
+	_hunger_bar.max_value = 100.0
+	_hunger_bar.value = local_player.hunger
+	_hunger_text.text = "Saciedad: %d%%" % int(local_player.hunger)
 
 	var gold: int = int(NetworkManager.local_profile.get("gold", 0))
 	var crowns: int = int(NetworkManager.local_profile.get("crowns", 0))
-	_currency_lbl.text = "Oro: %d  |  Coronas Cosméticas: %d" % [gold, crowns]
+	var used_slots: int = _count_local_backpack_slots()
+	var slots_txt: String = "∞" if is_inf else "%d/%d" % [used_slots, GameConfig.BACKPACK_MAX_SLOTS]
+	_currency_lbl.text = "Oro: %d | Coronas: %d | Mochila: %s" % [gold, crowns, slots_txt]
+
 	if _coords_lbl != null:
 		var wp: Vector3 = GameConfig.local_to_world(local_player.global_position)
-		var cc: Vector2i = GameConfig.world_to_chunk(wp)
-		var cam_mode: String = "1ª Persona" if local_player.is_first_person else "3ª Persona"
-		_coords_lbl.text = "Pos: (%d, %d) | Chunk (%d,%d) | Vista: %s (R3/V/Rueda)" % [int(wp.x), int(wp.z), cc.x, cc.y, cam_mode]
+		var cam_mode: String = "1ªP" if local_player.is_first_person else "3ªP"
+		_coords_lbl.text = "Pos: (%d, %d) | Vista: %s | [M] Mapa | [G/X] Dragón" % [int(wp.x), int(wp.z), cam_mode]
 	_grace_badge.visible = local_player.has_combat_grace
 
 	if local_player.is_mounted and local_player.mounted_dragon != null:
 		var dc: DragonController = local_player.mounted_dragon
 		_dragon_status_lbl.visible = true
-		_dragon_status_lbl.text = "DRAGÓN: %s | Vel: %d m/s | RT/LMB: Fuego | LT/RMB: Planear | A/Esp: Subir | B/Ctrl: Bajar | L3/Shift: Turbo | X/G: Bajar" % [
+		_dragon_status_lbl.text = "🐉 DRAGÓN: %s | Vel: %d m/s | RT/LMB: Fuego | LT/RMB: Planear | A/Esp: Subir | B/Ctrl: Bajar | X/G: Guardar en Mochila" % [
 			dc.get_flight_state_label(), int(dc.velocity.length())
 		]
 	else:
 		_dragon_status_lbl.visible = false
 
-	# Ability cooldown labels + active LB/RB selection highlight
 	var class_def: Dictionary = GameConfig.CLASSES.get(local_player.class_id, {}) as Dictionary
 	var abilities: Array = class_def.get("abilities", []) as Array
 	for i: int in range(mini(4, _ability_labels.size())):
@@ -381,20 +512,60 @@ func _update_player_vitals_ui() -> void:
 			_ability_labels[i].text = "%s[%d] %s\nLISTA" % [sel_tag, i + 1, ab_name]
 			_ability_labels[i].add_theme_color_override("font_color", Color(1.0, 0.94, 0.55) if is_sel else Color(0.88, 0.9, 0.96))
 
-	# Build bar visibility synced with local BuildingSystem
 	if local_player.building_system != null and _build_bar != null:
 		var bs: BuildingSystem = local_player.building_system
 		_build_bar.visible = bs.is_active
 		if bs.is_active:
 			var spec: Dictionary = GameConfig.BUILD_PIECES.get(bs.selected_piece, {}) as Dictionary
-			_build_info_lbl.text = "CONSTRUCCIÓN (B/D-Up salir) | %s (LB/RB o 1-6) | Snap (F/Back): %s | Rotar (R/X) | Colocar (LMB/RT)" % [
+			_build_info_lbl.text = "CONSTRUCCIÓN (B salir) | %s (LB/RB o 1-9) | Snap (F): %s | Rotar (R) | Colocar (LMB/RT)" % [
 				str(spec.get("name", bs.selected_piece)),
 				"ACTIVADO" if bs.snap_to_grid else "LIBRE"
 			]
 
 
+func _count_local_backpack_slots() -> int:
+	var inv: Dictionary = NetworkManager.local_profile.get("inventory", {}) as Dictionary
+	var total: int = 0
+	for q_var: Variant in inv.values():
+		var q: int = int(q_var)
+		if q > 0:
+			total += 1
+	return total
+
+
 func _update_ability_slot_names() -> void:
 	_update_player_vitals_ui()
+
+
+func _draw_minimap() -> void:
+	if _minimap_canvas == null or local_player == null:
+		return
+	var sz: Vector2 = _minimap_canvas.size
+	var center: Vector2 = sz * 0.5
+	var wp: Vector3 = GameConfig.local_to_world(local_player.global_position)
+	_minimap_canvas.draw_rect(Rect2(Vector2.ZERO, sz), Color(0.06, 0.09, 0.12, 0.92))
+	var scale_px: float = 0.24 # 1m = 0.24px (~300m view)
+
+	for sdef: Dictionary in GameConfig.SAFE_ZONES:
+		var sc: Vector2 = sdef.get("center_xz", Vector2.ZERO) as Vector2
+		var dp: Vector2 = Vector2(sc.x - wp.x, sc.y - wp.z) * scale_px + center
+		if dp.x >= 0.0 and dp.x <= sz.x and dp.y >= 0.0 and dp.y <= sz.y:
+			_minimap_canvas.draw_circle(dp, float(sdef.get("radius", 34.0)) * scale_px, Color(0.25, 0.85, 0.45, 0.3))
+
+	for wdef: Dictionary in GameConfig.WAYSHRINES:
+		var wxz: Vector2 = wdef.get("xz", Vector2.ZERO) as Vector2
+		var dp: Vector2 = Vector2(wxz.x - wp.x, wxz.y - wp.z) * scale_px + center
+		if dp.x >= 4.0 and dp.x <= sz.x - 4.0 and dp.y >= 4.0 and dp.y <= sz.y - 4.0:
+			_minimap_canvas.draw_circle(dp, 3.0, Color(0.35, 0.9, 1.0))
+
+	for bdef: Dictionary in GameConfig.WORLD_BOSSES:
+		var bxz: Vector2 = bdef.get("spawn_xz", Vector2.ZERO) as Vector2
+		var dp: Vector2 = Vector2(bxz.x - wp.x, bxz.y - wp.z) * scale_px + center
+		if dp.x >= 4.0 and dp.x <= sz.x - 4.0 and dp.y >= 4.0 and dp.y <= sz.y - 4.0:
+			_minimap_canvas.draw_circle(dp, 3.5, Color(1.0, 0.25, 0.22))
+
+	_minimap_canvas.draw_circle(center, 4.0, Color(1.0, 1.0, 1.0))
+	_minimap_canvas.draw_circle(center, 2.5, Color(0.2, 0.95, 0.45))
 
 
 # --- Programmatic Styled HUD Construction ---
@@ -429,11 +600,56 @@ func _build_hud_layout() -> void:
 	_slot_style_normal = dark_panel
 	_slot_style_selected = _make_style(Color(0.14, 0.12, 0.06, 0.92), Color(1.0, 0.86, 0.3, 1.0))
 
-	# 1. Top-Center Global Gracia Combativa Bar
+	# 0. Top-Left SafeZone / PvP Pill + Party HUD
+	var tl_vbox: VBoxContainer = VBoxContainer.new()
+	tl_vbox.position = Vector2(14.0, 10.0)
+	tl_vbox.custom_minimum_size = Vector2(300.0, 0.0)
+	root_control.add_child(tl_vbox)
+
+	_zone_pill = PanelContainer.new()
+	_zone_pill.add_theme_stylebox_override("panel", _make_style(Color(0.06, 0.22, 0.12, 0.9), Color(0.32, 0.95, 0.52, 0.95)))
+	tl_vbox.add_child(_zone_pill)
+	_zone_pill_lbl = Label.new()
+	_zone_pill_lbl.text = "🛡️ ZONA SEGURA: Santuario del Alba"
+	_zone_pill_lbl.add_theme_font_size_override("font_size", 12)
+	_zone_pill.add_child(_zone_pill_lbl)
+
+	var party_pill: PanelContainer = PanelContainer.new()
+	party_pill.add_theme_stylebox_override("panel", dark_panel)
+	tl_vbox.add_child(party_pill)
+	_party_hud_lbl = Label.new()
+	_party_hud_lbl.text = "Grupo (Tab): Solo (4 jug. para Mazmorras)"
+	_party_hud_lbl.add_theme_font_size_override("font_size", 11)
+	party_pill.add_child(_party_hud_lbl)
+
+	# 0b. Top-Right Corner Minimap
+	var mm_panel: PanelContainer = PanelContainer.new()
+	mm_panel.add_theme_stylebox_override("panel", dark_panel)
+	mm_panel.anchor_left = 1.0
+	mm_panel.anchor_right = 1.0
+	mm_panel.anchor_top = 0.0
+	mm_panel.offset_left = -168.0
+	mm_panel.offset_right = -14.0
+	mm_panel.offset_top = 10.0
+	mm_panel.offset_bottom = 176.0
+	root_control.add_child(mm_panel)
+	var mm_vb: VBoxContainer = VBoxContainer.new()
+	mm_panel.add_child(mm_vb)
+	var mm_title: Label = Label.new()
+	mm_title.text = "Minimapa [M: Mundo]"
+	mm_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mm_title.add_theme_font_size_override("font_size", 11)
+	mm_vb.add_child(mm_title)
+	_minimap_canvas = Control.new()
+	_minimap_canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_minimap_canvas.draw.connect(_draw_minimap)
+	mm_vb.add_child(_minimap_canvas)
+
+	# 1. Top-Center Global Gracia Combativa + Season Bar
 	var top_bar: PanelContainer = PanelContainer.new()
 	top_bar.add_theme_stylebox_override("panel", dark_panel)
-	top_bar.anchor_left = 0.2
-	top_bar.anchor_right = 0.8
+	top_bar.anchor_left = 0.25
+	top_bar.anchor_right = 0.75
 	top_bar.anchor_top = 0.0
 	top_bar.offset_top = 10.0
 	top_bar.offset_bottom = 48.0
@@ -443,7 +659,7 @@ func _build_hud_layout() -> void:
 	_grace_label.text = "Gracia Combativa: sincronizando..."
 	top_bar.add_child(_grace_label)
 
-	# 1b. Live World Boss / Dungeon Boss Health Bar (visible within 65m of a Boss)
+	# 1b. Live World Boss / Supreme Dragon Boss Health Bar
 	_boss_bar_box = PanelContainer.new()
 	_boss_bar_box.add_theme_stylebox_override("panel", _make_style(Color(0.14, 0.05, 0.05, 0.9), Color(0.95, 0.3, 0.22, 0.95)))
 	_boss_bar_box.anchor_left = 0.24
@@ -463,14 +679,14 @@ func _build_hud_layout() -> void:
 	_boss_hp_bar = _create_bar(boss_vb, Color(0.86, 0.16, 0.14))
 	_boss_hp_lbl = _attach_bar_label(_boss_hp_bar)
 
-	# 2. Dramatic Global Event Banner (hidden by default)
+	# 2. Dramatic Global Event Banner
 	_banner_box = PanelContainer.new()
 	_banner_box.add_theme_stylebox_override("panel", _make_style(Color(0.14, 0.09, 0.04, 0.92), Color(1.0, 0.85, 0.32, 0.95)))
 	_banner_box.anchor_left = 0.22
 	_banner_box.anchor_right = 0.78
 	_banner_box.anchor_top = 0.0
 	_banner_box.offset_top = 120.0
-	_banner_box.offset_bottom = 192.0
+	_banner_box.offset_bottom = 196.0
 	_banner_box.visible = false
 	root_control.add_child(_banner_box)
 	var bvb: VBoxContainer = VBoxContainer.new()
@@ -484,7 +700,7 @@ func _build_hud_layout() -> void:
 	_banner_body.autowrap_mode = TextServer.AUTOWRAP_WORD
 	bvb.add_child(_banner_body)
 
-	# 3. Elder Scrolls Style Center Reticle (Crosshair)
+	# 3. Elder Scrolls Center Reticle
 	_crosshair_root = Control.new()
 	_crosshair_root.anchor_left = 0.5
 	_crosshair_root.anchor_top = 0.5
@@ -507,19 +723,19 @@ func _build_hud_layout() -> void:
 		tick.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_crosshair_root.add_child(tick)
 
-	# 4. Bottom-Left Vitals Card
+	# 4. Bottom-Left Vitals Card (HP, Mana, Stamina, Hunger)
 	var vitals: PanelContainer = PanelContainer.new()
 	vitals.add_theme_stylebox_override("panel", dark_panel)
 	vitals.anchor_left = 0.0
 	vitals.anchor_top = 1.0
 	vitals.anchor_bottom = 1.0
 	vitals.offset_left = 14.0
-	vitals.offset_right = 356.0
-	vitals.offset_top = -196.0
+	vitals.offset_right = 368.0
+	vitals.offset_top = -224.0
 	vitals.offset_bottom = -14.0
 	root_control.add_child(vitals)
 	var vv: VBoxContainer = VBoxContainer.new()
-	vv.add_theme_constant_override("separation", 4)
+	vv.add_theme_constant_override("separation", 3)
 	vitals.add_child(vv)
 	_player_title = Label.new()
 	_player_title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.45))
@@ -537,6 +753,8 @@ func _build_hud_layout() -> void:
 	_mana_text = _attach_bar_label(_mana_bar)
 	_stamina_bar = _create_bar(vv, Color(0.2, 0.68, 0.34))
 	_stamina_text = _attach_bar_label(_stamina_bar)
+	_hunger_bar = _create_bar(vv, Color(0.84, 0.54, 0.16))
+	_hunger_text = _attach_bar_label(_hunger_bar)
 
 	_currency_lbl = Label.new()
 	_currency_lbl.add_theme_font_size_override("font_size", 12)
@@ -546,7 +764,7 @@ func _build_hud_layout() -> void:
 	_coords_lbl.add_theme_color_override("font_color", Color(0.72, 0.82, 0.92))
 	vv.add_child(_coords_lbl)
 
-	# 5. Bottom-Center Ability Hotbar + Dragon Flight Banner + Controls Legend
+	# 5. Bottom-Center Ability Hotbar + Dragon Flight Banner
 	var bottom_center: VBoxContainer = VBoxContainer.new()
 	bottom_center.anchor_left = 0.28
 	bottom_center.anchor_right = 0.72
@@ -587,14 +805,14 @@ func _build_hud_layout() -> void:
 	controls_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	controls_lbl.add_theme_font_size_override("font_size", 11)
 	controls_lbl.add_theme_color_override("font_color", Color(0.76, 0.82, 0.9))
-	controls_lbl.text = "LMB/RT: Atacar | RMB/LT: Bloq/Hechizo | LB/RB: Rotar | Q/B: Esquivar | G/X: Dragón | E/Y: Interactuar | R3/V/Rueda: 1ª/3ªP | D-Pad/B,I,Tab,T: Menús | F1: Avatar"
+	controls_lbl.text = "LMB/RT: Atacar | RMB/LT: Bloq | Q/B: Esquivar | G/X: Dragón | E/Y: Interactuar | M: Mapa | B: Casas | I: Mochila | Tab: Grupo/Reinos | T: Tienda | F1: Avatar"
 	bottom_center.add_child(controls_lbl)
 
-	# 6. Build Mode Selection Bar (visible when B active)
+	# 6. Build Mode Selection Bar
 	_build_bar = PanelContainer.new()
 	_build_bar.add_theme_stylebox_override("panel", dark_panel)
-	_build_bar.anchor_left = 0.18
-	_build_bar.anchor_right = 0.82
+	_build_bar.anchor_left = 0.1
+	_build_bar.anchor_right = 0.9
 	_build_bar.anchor_top = 1.0
 	_build_bar.anchor_bottom = 1.0
 	_build_bar.offset_top = -226.0
@@ -607,10 +825,13 @@ func _build_hud_layout() -> void:
 	_build_info_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_build_info_lbl.add_theme_color_override("font_color", Color(0.6, 1.0, 0.72))
 	bbv.add_child(_build_info_lbl)
+	var piece_scroll: ScrollContainer = ScrollContainer.new()
+	piece_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	bbv.add_child(piece_scroll)
 	var piece_row: HBoxContainer = HBoxContainer.new()
 	piece_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	piece_row.add_theme_constant_override("separation", 6)
-	bbv.add_child(piece_row)
+	piece_row.add_theme_constant_override("separation", 5)
+	piece_scroll.add_child(piece_row)
 	var piece_idx: int = 1
 	for pkey_var: Variant in GameConfig.BUILD_PIECES.keys():
 		var pkey: String = str(pkey_var)
@@ -651,6 +872,8 @@ func _build_hud_layout() -> void:
 
 	# 8. Modal Windows
 	_build_inventory_market_modal(modal_panel)
+	_build_storage_chest_modal(modal_panel)
+	_build_world_map_modal()
 	_build_cosmetic_shop_modal(modal_panel)
 	_build_guilds_bounties_modal(modal_panel)
 	_build_avatar_console_modal(modal_panel)
@@ -659,7 +882,7 @@ func _build_hud_layout() -> void:
 
 func _create_bar(parent: Control, fill_color: Color) -> ProgressBar:
 	var bar: ProgressBar = ProgressBar.new()
-	bar.custom_minimum_size = Vector2(0, 22)
+	bar.custom_minimum_size = Vector2(0, 20)
 	bar.show_percentage = false
 	var bg: StyleBoxFlat = StyleBoxFlat.new()
 	bg.bg_color = Color(0.12, 0.14, 0.18, 0.9)
@@ -678,7 +901,7 @@ func _attach_bar_label(bar: ProgressBar) -> Label:
 	lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_font_size_override("font_size", 11)
 	bar.add_child(lbl)
 	return lbl
 
@@ -714,11 +937,67 @@ func _make_centered_modal(style: StyleBoxFlat, title_text: String, width: float,
 	close_btn.pressed.connect(_close_all_panels)
 	header.add_child(close_btn)
 
-	return {"panel": panel, "vbox": vbox}
+	return {"panel": panel, "vbox": vbox, "title": title}
+
+
+func _build_world_map_modal() -> void:
+	_world_map_ui = WorldMapUI.new()
+	_world_map_ui.anchor_left = 0.5
+	_world_map_ui.anchor_right = 0.5
+	_world_map_ui.anchor_top = 0.5
+	_world_map_ui.anchor_bottom = 0.5
+	_world_map_ui.offset_left = -480.0
+	_world_map_ui.offset_right = 480.0
+	_world_map_ui.offset_top = -310.0
+	_world_map_ui.offset_bottom = 310.0
+	_world_map_ui.map_closed.connect(_close_all_panels)
+	_world_map_ui.wayshrine_teleport_requested.connect(func(wid: String) -> void:
+		if _world_auth != null:
+			_world_auth.request_wayshrine_teleport(wid)
+		_close_all_panels()
+	)
+	root_control.add_child(_world_map_ui)
+
+
+func _build_storage_chest_modal(style: StyleBoxFlat) -> void:
+	var m: Dictionary = _make_centered_modal(style, "Cajón de Guardado Privado (60 espacios)", 720.0, 460.0)
+	_chest_panel = m["panel"] as PanelContainer
+	_chest_title_lbl = m["title"] as Label
+	var vbox: VBoxContainer = m["vbox"] as VBoxContainer
+	var cols: HBoxContainer = HBoxContainer.new()
+	cols.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	cols.add_theme_constant_override("separation", 12)
+	vbox.add_child(cols)
+
+	var c1: VBoxContainer = VBoxContainer.new()
+	c1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(c1)
+	var l1: Label = Label.new()
+	l1.text = "Tu Mochila (Guardar en Cajón →)"
+	c1.add_child(l1)
+	var s1: ScrollContainer = ScrollContainer.new()
+	s1.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	c1.add_child(s1)
+	_chest_bag_box = VBoxContainer.new()
+	_chest_bag_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s1.add_child(_chest_bag_box)
+
+	var c2: VBoxContainer = VBoxContainer.new()
+	c2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	cols.add_child(c2)
+	var l2: Label = Label.new()
+	l2.text = "Contenido del Cajón (← Retirar)"
+	c2.add_child(l2)
+	var s2: ScrollContainer = ScrollContainer.new()
+	s2.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	c2.add_child(s2)
+	_chest_box = VBoxContainer.new()
+	_chest_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	s2.add_child(_chest_box)
 
 
 func _build_inventory_market_modal(style: StyleBoxFlat) -> void:
-	var m: Dictionary = _make_centered_modal(style, "Inventario, Forja y Mercado de Jugadores (I)", 820.0, 500.0)
+	var m: Dictionary = _make_centered_modal(style, "Mochila (150), Forja/Cocina y Economía 100% Jugadores (I)", 900.0, 540.0)
 	_inv_panel = m["panel"] as PanelContainer
 	var vbox: VBoxContainer = m["vbox"] as VBoxContainer
 	var cols: HBoxContainer = HBoxContainer.new()
@@ -726,13 +1005,13 @@ func _build_inventory_market_modal(style: StyleBoxFlat) -> void:
 	cols.add_theme_constant_override("separation", 12)
 	vbox.add_child(cols)
 
-	# Column 1: Inventory
+	# Column 1: 150-Slot Backpack
 	var c1: VBoxContainer = VBoxContainer.new()
 	c1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(c1)
-	var l1: Label = Label.new()
-	l1.text = "Mochila (Saqueable al morir)"
-	c1.add_child(l1)
+	_inv_slots_lbl = Label.new()
+	_inv_slots_lbl.text = "Mochila (0 / 150 espacios)"
+	c1.add_child(_inv_slots_lbl)
 	var s1: ScrollContainer = ScrollContainer.new()
 	s1.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	c1.add_child(s1)
@@ -740,12 +1019,12 @@ func _build_inventory_market_modal(style: StyleBoxFlat) -> void:
 	_inv_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s1.add_child(_inv_list_box)
 
-	# Column 2: Crafting
+	# Column 2: Crafting (Forge / Alchemy / Campfire Cooking)
 	var c2: VBoxContainer = VBoxContainer.new()
 	c2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(c2)
 	var l2: Label = Label.new()
-	l2.text = "Forja / Crafteo"
+	l2.text = "Forja Elemental, Alquimia y Cocina"
 	c2.add_child(l2)
 	var s2: ScrollContainer = ScrollContainer.new()
 	s2.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -754,12 +1033,12 @@ func _build_inventory_market_modal(style: StyleBoxFlat) -> void:
 	_craft_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	s2.add_child(_craft_list_box)
 
-	# Column 3: Player Market
+	# Column 3: 100% Player Market + Direct P2P Trade
 	var c3: VBoxContainer = VBoxContainer.new()
 	c3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(c3)
 	var l3: Label = Label.new()
-	l3.text = "Comercio entre Jugadores"
+	l3.text = "Economía 100% de Jugadores (Sin NPCs)"
 	c3.add_child(l3)
 	_market_item_opt = OptionButton.new()
 	for ikey_var: Variant in GameConfig.ITEMS.keys():
@@ -782,7 +1061,7 @@ func _build_inventory_market_modal(style: StyleBoxFlat) -> void:
 	_market_price_spin.prefix = "Oro:"
 	sell_row.add_child(_market_price_spin)
 	var list_btn: Button = Button.new()
-	list_btn.text = "Publicar Oferta"
+	list_btn.text = "Publicar Oferta de Jugador"
 	list_btn.pressed.connect(func() -> void:
 		var idx: int = _market_item_opt.selected
 		if idx >= 0:
@@ -790,6 +1069,32 @@ func _build_inventory_market_modal(style: StyleBoxFlat) -> void:
 			NetworkManager.request_market_list(iid, int(_market_qty_spin.value), int(_market_price_spin.value))
 	)
 	c3.add_child(list_btn)
+
+	# Direct P2P Trade bar
+	var trade_row: HBoxContainer = HBoxContainer.new()
+	c3.add_child(trade_row)
+	_trade_target_in = LineEdit.new()
+	_trade_target_in.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_trade_target_in.placeholder_text = "Jugador para Trueque P2P"
+	trade_row.add_child(_trade_target_in)
+	var tr_btn: Button = Button.new()
+	tr_btn.text = "Trueque"
+	tr_btn.pressed.connect(func() -> void: NetworkManager.request_trade_start(_trade_target_in.text))
+	trade_row.add_child(tr_btn)
+	var tr_ok: Button = Button.new()
+	tr_ok.text = "Confirmar"
+	tr_ok.pressed.connect(func() -> void:
+		var idx: int = _market_item_opt.selected
+		var iid: String = str(_market_item_opt.get_item_metadata(idx)) if idx >= 0 else ""
+		NetworkManager.request_trade_offer(int(_market_price_spin.value), iid, int(_market_qty_spin.value))
+		NetworkManager.request_trade_confirm()
+	)
+	trade_row.add_child(tr_ok)
+	_trade_status_lbl = Label.new()
+	_trade_status_lbl.text = "Trueque Directo: Sin sesión activa."
+	_trade_status_lbl.add_theme_font_size_override("font_size", 11)
+	c3.add_child(_trade_status_lbl)
+
 	var s3: ScrollContainer = ScrollContainer.new()
 	s3.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	c3.add_child(s3)
@@ -813,7 +1118,7 @@ func _build_cosmetic_shop_modal(style: StyleBoxFlat) -> void:
 	top.add_child(claim_btn)
 
 	var note: Label = Label.new()
-	note.text = "Todos los artículos son 100% visuales (armaduras, dragones y estelas) y nunca se pierden al morir."
+	note.text = "100% visual (0% estadísticas). Gratis para Avatares ♾️. Nunca se pierden al morir ni al reiniciar temporada."
 	note.add_theme_color_override("font_color", Color(0.72, 0.92, 0.78))
 	vbox.add_child(note)
 
@@ -826,15 +1131,42 @@ func _build_cosmetic_shop_modal(style: StyleBoxFlat) -> void:
 
 
 func _build_guilds_bounties_modal(style: StyleBoxFlat) -> void:
-	var m: Dictionary = _make_centered_modal(style, "Reinos, Filosofía y Contratos de Jugadores (Tab)", 780.0, 500.0)
+	var m: Dictionary = _make_centered_modal(style, "Grupo (4 Jug.), Reinos, Alineación y Contratos (Tab)", 820.0, 540.0)
 	_guilds_panel = m["panel"] as PanelContainer
 	var vbox: VBoxContainer = m["vbox"] as VBoxContainer
 
-	# Personal Philosophy selector (100% voluntary, zero automatic karma)
+	# 4-Player Party bar
+	var party_row: HBoxContainer = HBoxContainer.new()
+	vbox.add_child(party_row)
+	_party_invite_in = LineEdit.new()
+	_party_invite_in.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_party_invite_in.placeholder_text = "Invitar jugador a Grupo (4 jugadores para Mazmorras)"
+	party_row.add_child(_party_invite_in)
+	var p_inv_btn: Button = Button.new()
+	p_inv_btn.text = "Invitar al Grupo"
+	p_inv_btn.pressed.connect(func() -> void:
+		NetworkManager.request_party_invite(_party_invite_in.text)
+		_party_invite_in.clear()
+	)
+	party_row.add_child(p_inv_btn)
+	var p_acc_btn: Button = Button.new()
+	p_acc_btn.text = "Aceptar Invitación"
+	p_acc_btn.pressed.connect(func() -> void: NetworkManager.request_party_accept())
+	party_row.add_child(p_acc_btn)
+	var p_leave_btn: Button = Button.new()
+	p_leave_btn.text = "Salir del Grupo"
+	p_leave_btn.pressed.connect(func() -> void: NetworkManager.request_party_leave())
+	party_row.add_child(p_leave_btn)
+
+	_party_list_lbl = Label.new()
+	_party_list_lbl.text = "Grupo: Solo"
+	_party_list_lbl.add_theme_color_override("font_color", Color(0.68, 0.92, 1.0))
+	vbox.add_child(_party_list_lbl)
+
 	var phil_row: HBoxContainer = HBoxContainer.new()
 	vbox.add_child(phil_row)
 	var plbl: Label = Label.new()
-	plbl.text = "Tu Estandarte Personal (libre, sin karma automático): "
+	plbl.text = "Alineación / Estandarte: "
 	phil_row.add_child(plbl)
 	for phil: String in [GameConfig.PHILOSOPHY_NEUTRAL, GameConfig.PHILOSOPHY_ORDER, GameConfig.PHILOSOPHY_CHAOS]:
 		var pb: Button = Button.new()
@@ -847,7 +1179,6 @@ func _build_guilds_bounties_modal(style: StyleBoxFlat) -> void:
 	cols.add_theme_constant_override("separation", 12)
 	vbox.add_child(cols)
 
-	# Left: Kingdoms / Guilds
 	var left: VBoxContainer = VBoxContainer.new()
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(left)
@@ -881,7 +1212,6 @@ func _build_guilds_bounties_modal(style: StyleBoxFlat) -> void:
 	_guild_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gs.add_child(_guild_list_box)
 
-	# Right: Player-Funded Bounties / Contracts
 	var right: VBoxContainer = VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	cols.add_child(right)
@@ -898,7 +1228,7 @@ func _build_guilds_bounties_modal(style: StyleBoxFlat) -> void:
 	_bounty_gold_spin.prefix = "Recompensa Oro: "
 	right.add_child(_bounty_gold_spin)
 	_bounty_reason_in = LineEdit.new()
-	_bounty_reason_in.placeholder_text = "Motivo (ej: saqueó caravana del Orden)"
+	_bounty_reason_in.placeholder_text = "Motivo..."
 	right.add_child(_bounty_reason_in)
 	var post_b_btn: Button = Button.new()
 	post_b_btn.text = "Publicar Contrato"
@@ -917,14 +1247,14 @@ func _build_guilds_bounties_modal(style: StyleBoxFlat) -> void:
 
 
 func _build_avatar_console_modal(style: StyleBoxFlat) -> void:
-	var m: Dictionary = _make_centered_modal(style, "Consola de Avatar de Creador — Orden / Caos (F1)", 640.0, 470.0)
+	var m: Dictionary = _make_centered_modal(style, "Consola de Avatar Primordial ♾️ — Orden / Caos (F1)", 680.0, 540.0)
 	_avatar_panel = m["panel"] as PanelContainer
 	var vbox: VBoxContainer = m["vbox"] as VBoxContainer
 
 	var role: String = str(NetworkManager.local_profile.get("role", GameConfig.ROLE_PLAYER))
 	if not GameConfig.is_avatar_role(role):
 		var denied: Label = Label.new()
-		denied.text = "Acceso exclusivo para los Avatares de los Creadores (AVATAR_ORDEN y AVATAR_CAOS).\n\nPara probar esta consola, iniciá sesión con:\n• AvatarOrden / orden_creador\n• AvatarCaos / caos_creador"
+		denied.text = "Acceso exclusivo para los Avatares de los Creadores (AVATAR_ORDEN y AVATAR_CAOS).\n\nIniciá sesión con:\n• AvatarOrden / orden_creador\n• AvatarCaos / caos_creador"
 		denied.autowrap_mode = TextServer.AUTOWRAP_WORD
 		vbox.add_child(denied)
 		return
@@ -934,25 +1264,49 @@ func _build_avatar_console_modal(style: StyleBoxFlat) -> void:
 	_avatar_roster_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
 	vbox.add_child(_avatar_roster_lbl)
 
+	# Disguised Level-1 Novice & Divine Form buttons
+	var form_row: HBoxContainer = HBoxContainer.new()
+	vbox.add_child(form_row)
+	var novice_btn: Button = Button.new()
+	novice_btn.text = "🎭 Encarnar como Novato (Nivel 1) / Revelar ♾️"
+	novice_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	novice_btn.pressed.connect(func() -> void:
+		if _world_auth != null:
+			_world_auth.request_avatar_toggle_disguised_novice()
+	)
+	form_row.add_child(novice_btn)
+
 	var divine_btn: Button = Button.new()
-	divine_btn.text = "Activar / Desactivar Descenso Divino (Forma de Avatar + Corona + Inmortalidad)"
+	divine_btn.text = "👑 Forma Divina (Inmortal)"
 	divine_btn.pressed.connect(func() -> void:
 		if _world_auth != null:
 			_world_auth.request_avatar_toggle_divine_form()
 	)
-	vbox.add_child(divine_btn)
+	form_row.add_child(divine_btn)
 
-	# Instant Combat Grace Roll Button
+	# Faction-Wide Grace + Daily Random Grace
+	var grace_row: HBoxContainer = HBoxContainer.new()
+	vbox.add_child(grace_row)
 	var grace_btn: Button = Button.new()
-	grace_btn.text = "★ INVOCAR GRACIA COMBATIVA AHORA (1 Jugador al Azar, x2.0 por 24h) ★"
+	grace_btn.text = "★ Gracia Diaria al Azar (x2, 24h)"
+	grace_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	grace_btn.pressed.connect(func() -> void:
 		if _world_auth != null:
 			_world_auth.request_avatar_trigger_grace("")
 	)
-	vbox.add_child(grace_btn)
+	grace_row.add_child(grace_btn)
+
+	var fgrace_btn: Button = Button.new()
+	fgrace_btn.text = "⚡ Gracia Combativa a Toda mi Facción"
+	fgrace_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	fgrace_btn.pressed.connect(func() -> void:
+		if _world_auth != null:
+			_world_auth.request_avatar_grant_faction_grace()
+	)
+	grace_row.add_child(fgrace_btn)
 
 	_avatar_target_in = LineEdit.new()
-	_avatar_target_in.placeholder_text = "Nombre de jugador objetivo (opcional para acciones dirigidas)"
+	_avatar_target_in.placeholder_text = "Nombre de jugador objetivo (opcional)"
 	vbox.add_child(_avatar_target_in)
 
 	var target_row: HBoxContainer = HBoxContainer.new()
@@ -965,7 +1319,7 @@ func _build_avatar_console_modal(style: StyleBoxFlat) -> void:
 	)
 	target_row.add_child(b_grace_t)
 	var b_favor: Button = Button.new()
-	b_favor.text = "Otorgar Favor Divino (+35% + Oro)"
+	b_favor.text = "Favor Divino (+35% + Oro)"
 	b_favor.pressed.connect(func() -> void:
 		if _world_auth != null:
 			_world_auth.request_avatar_grant_favor(_avatar_target_in.text)
@@ -992,7 +1346,7 @@ func _build_avatar_console_modal(style: StyleBoxFlat) -> void:
 	_avatar_z_spin.prefix = "Z:"
 	tp_row.add_child(_avatar_z_spin)
 	var b_tp_c: Button = Button.new()
-	b_tp_c.text = "Teletransportar a Coordenadas"
+	b_tp_c.text = "TP a Coordenadas"
 	b_tp_c.pressed.connect(func() -> void:
 		if _world_auth != null:
 			_world_auth.request_avatar_teleport("", Vector3(_avatar_x_spin.value, 25.0, _avatar_z_spin.value))
@@ -1016,51 +1370,37 @@ func _build_avatar_console_modal(style: StyleBoxFlat) -> void:
 
 	var world_row: HBoxContainer = HBoxContainer.new()
 	vbox.add_child(world_row)
-	var b_day: Button = Button.new()
-	b_day.text = "Invocar Día"
-	b_day.pressed.connect(func() -> void:
-		if _world_auth != null:
-			_world_auth.request_avatar_world_command("set_day", "")
-	)
-	world_row.add_child(b_day)
-	var b_night: Button = Button.new()
-	b_night.text = "Invocar Noche"
-	b_night.pressed.connect(func() -> void:
-		if _world_auth != null:
-			_world_auth.request_avatar_world_command("set_night", "")
-	)
-	world_row.add_child(b_night)
-	var b_rep: Button = Button.new()
-	b_rep.text = "Reparar Estructura"
-	b_rep.pressed.connect(func() -> void:
-		if _world_auth != null:
-			_world_auth.request_avatar_world_command("repair_nearest", "")
-	)
-	world_row.add_child(b_rep)
-	var b_boss: Button = Button.new()
-	b_boss.text = "Reaparecer Jefes"
-	b_boss.pressed.connect(func() -> void:
-		if _world_auth != null:
-			_world_auth.request_avatar_world_command("respawn_bosses", "")
-	)
-	world_row.add_child(b_boss)
-	var b_kick: Button = Button.new()
-	b_kick.text = "Expulsar Objetivo"
-	b_kick.pressed.connect(func() -> void:
-		if _world_auth != null:
-			_world_auth.request_avatar_world_command("kick", _avatar_target_in.text)
-	)
-	world_row.add_child(b_kick)
+	for pair: Array in [
+		["Día", "set_day"],
+		["Noche", "set_night"],
+		["Reparar", "repair_nearest"],
+		["Reaparecer Jefes", "respawn_bosses"],
+		["🔄 Reiniciar Temporada", "season_reset"],
+		["Expulsar", "kick"]
+	]:
+		var btn: Button = Button.new()
+		btn.text = str(pair[0])
+		var cmd_id: String = str(pair[1])
+		btn.pressed.connect(func() -> void:
+			if _world_auth != null:
+				_world_auth.request_avatar_world_command(cmd_id, _avatar_target_in.text if cmd_id == "kick" else "")
+		)
+		world_row.add_child(btn)
 
 
 func _build_pause_modal(style: StyleBoxFlat) -> void:
-	var m: Dictionary = _make_centered_modal(style, "Menú de Pausa", 360.0, 230.0)
+	var m: Dictionary = _make_centered_modal(style, "Menú de Pausa", 360.0, 260.0)
 	_pause_panel = m["panel"] as PanelContainer
 	var vbox: VBoxContainer = m["vbox"] as VBoxContainer
 	var resume: Button = Button.new()
 	resume.text = "Continuar Jugando"
 	resume.pressed.connect(_close_all_panels)
 	vbox.add_child(resume)
+
+	var map_btn: Button = Button.new()
+	map_btn.text = "🗺️ Abrir Mapa del Mundo (M)"
+	map_btn.pressed.connect(open_world_map)
+	vbox.add_child(map_btn)
 
 	var lore_btn: Button = Button.new()
 	lore_btn.text = "Leer Mitología en el Chat"
@@ -1101,13 +1441,52 @@ func _clear_box(box: VBoxContainer) -> void:
 		c.queue_free()
 
 
+func _refresh_chest_panel() -> void:
+	if _chest_bag_box == null or _chest_box == null:
+		return
+	_clear_box(_chest_bag_box)
+	var inv: Dictionary = NetworkManager.local_profile.get("inventory", {}) as Dictionary
+	for item_var: Variant in inv.keys():
+		var iid: String = str(item_var)
+		var qty: int = int(inv[iid])
+		if qty <= 0 or not GameConfig.ITEMS.has(iid):
+			continue
+		var iname: String = str((GameConfig.ITEMS[iid] as Dictionary).get("name", iid))
+		var btn: Button = Button.new()
+		btn.text = "%s x%d  → Guardar" % [iname, qty]
+		btn.pressed.connect(func() -> void: NetworkManager.request_chest_transfer(_open_chest_id, iid, 1, true))
+		_chest_bag_box.add_child(btn)
+
+	_clear_box(_chest_box)
+	for item_var: Variant in _open_chest_items.keys():
+		var iid: String = str(item_var)
+		var qty: int = int(_open_chest_items[iid])
+		if qty <= 0 or not GameConfig.ITEMS.has(iid):
+			continue
+		var iname: String = str((GameConfig.ITEMS[iid] as Dictionary).get("name", iid))
+		var btn: Button = Button.new()
+		btn.text = "← Retirar  %s x%d" % [iname, qty]
+		btn.pressed.connect(func() -> void: NetworkManager.request_chest_transfer(_open_chest_id, iid, 1, false))
+		_chest_box.add_child(btn)
+
+
 func _refresh_inventory_panel() -> void:
 	if _inv_list_box == null:
 		return
 	_clear_box(_inv_list_box)
+	var is_admin: bool = GameConfig.is_avatar_role(str(NetworkManager.local_profile.get("role", "")))
+	var used_slots: int = _count_local_backpack_slots()
+	if _inv_slots_lbl != null:
+		_inv_slots_lbl.text = "Mochila (%s espacios — Saqueable en PvP)" % ("♾️" if is_admin else "%d / %d" % [used_slots, GameConfig.BACKPACK_MAX_SLOTS])
+
 	var inv: Dictionary = NetworkManager.local_profile.get("inventory", {}) as Dictionary
-	var eq_w: String = str(NetworkManager.local_profile.get("equipped_weapon", ""))
-	var eq_a: String = str(NetworkManager.local_profile.get("equipped_armor_item", ""))
+	var eq_slots: Array[String] = [
+		str(NetworkManager.local_profile.get("equipped_weapon", "")),
+		str(NetworkManager.local_profile.get("equipped_helmet", "")),
+		str(NetworkManager.local_profile.get("equipped_chest", "")),
+		str(NetworkManager.local_profile.get("equipped_legs", "")),
+		str(NetworkManager.local_profile.get("equipped_boots", ""))
+	]
 	for item_var: Variant in inv.keys():
 		var iid: String = str(item_var)
 		var qty: int = int(inv[iid])
@@ -1117,14 +1496,14 @@ func _refresh_inventory_panel() -> void:
 		var row: HBoxContainer = HBoxContainer.new()
 		_inv_list_box.add_child(row)
 		var lbl: Label = Label.new()
-		var eq_tag: String = " [EQ]" if (iid == eq_w or iid == eq_a) else ""
+		var eq_tag: String = " [EQ]" if eq_slots.has(iid) else ""
 		lbl.text = "%s x%d%s" % [str(idef["name"]), qty, eq_tag]
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(lbl)
 		var itype: String = str(idef.get("type", ""))
-		if itype != "resource":
+		if itype == "weapon" or itype == "armor" or itype == "consumable" or itype == "food":
 			var btn: Button = Button.new()
-			btn.text = "Usar" if itype == "consumable" else "Equipar"
+			btn.text = "Comer" if itype == "food" else ("Usar" if itype == "consumable" else "Equipar")
 			btn.pressed.connect(func() -> void: NetworkManager.request_equip_or_use_item(iid))
 			row.add_child(btn)
 
@@ -1133,36 +1512,30 @@ func _refresh_inventory_panel() -> void:
 		var rkey: String = str(rkey_var)
 		var rec: Dictionary = GameConfig.CRAFT_RECIPES[rkey] as Dictionary
 		var st_tag: String = str(rec.get("station", "forge"))
+		if not _station_filter.is_empty() and _station_filter != "shop_stall" and st_tag != _station_filter:
+			continue
 		var idef: Dictionary = GameConfig.ITEMS[rkey] as Dictionary
 		var cost_parts: Array[String] = []
 		var cost: Dictionary = rec["cost"] as Dictionary
 		for ckey_var: Variant in cost.keys():
 			cost_parts.append("%s:%d" % [str((GameConfig.ITEMS[str(ckey_var)] as Dictionary)["name"]), int(cost[ckey_var])])
-		var prefix: String = "[Alq] " if st_tag == "alchemy" else "[Forja] "
+		var prefix: String = "[Cocina] " if st_tag == "campfire" else ("[Alq] " if st_tag == "alchemy" else "[Forja] ")
 		var btn: Button = Button.new()
 		btn.text = "%s%s (%s)" % [prefix, str(idef["name"]), ", ".join(cost_parts)]
 		btn.pressed.connect(func() -> void: NetworkManager.request_craft(rkey))
 		_craft_list_box.add_child(btn)
 
+	# 100% Player-Driven Market (Zero NPC vendors!)
 	_clear_box(_market_list_box)
-	var merch_hdr: Label = Label.new()
-	merch_hdr.text = "— Tienda del Asentamiento (Oro) —"
-	merch_hdr.add_theme_color_override("font_color", Color(1.0, 0.86, 0.42))
-	_market_list_box.add_child(merch_hdr)
-	for m_idx: int in range(GameConfig.MERCHANT_STOCK.size()):
-		var offer: Dictionary = GameConfig.MERCHANT_STOCK[m_idx]
-		var iid: String = str(offer["item_id"])
-		var iname: String = str((GameConfig.ITEMS.get(iid, {}) as Dictionary).get("name", iid))
-		var mbtn: Button = Button.new()
-		mbtn.text = "Comprar %s x%d (%d oro)" % [iname, int(offer["qty"]), int(offer["price_gold"])]
-		var captured_idx: int = m_idx
-		mbtn.pressed.connect(func() -> void: NetworkManager.request_merchant_buy(captured_idx))
-		_market_list_box.add_child(mbtn)
-
 	var p_hdr: Label = Label.new()
-	p_hdr.text = "— Mercado de Jugadores —"
+	p_hdr.text = "— Ofertas Publicadas por Jugadores —"
 	p_hdr.add_theme_color_override("font_color", Color(0.72, 0.9, 1.0))
 	_market_list_box.add_child(p_hdr)
+	if NetworkManager.cached_listings.is_empty():
+		var empty_lbl: Label = Label.new()
+		empty_lbl.text = "Sin ofertas activas. ¡Publicá tus materiales o equipo forjado arriba!"
+		empty_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD
+		_market_list_box.add_child(empty_lbl)
 	for entry_var: Variant in NetworkManager.cached_listings:
 		var entry: Dictionary = entry_var as Dictionary
 		var lid: int = int(entry.get("id", -1))
@@ -1177,17 +1550,18 @@ func _refresh_inventory_panel() -> void:
 func _refresh_shop_panel() -> void:
 	if _shop_list_box == null:
 		return
+	var is_admin: bool = GameConfig.is_avatar_role(str(NetworkManager.local_profile.get("role", "")))
 	var crowns: int = int(NetworkManager.local_profile.get("crowns", 0))
-	_shop_crowns_lbl.text = "Tus Coronas Cosméticas: %d" % crowns
+	_shop_crowns_lbl.text = "Tus Coronas: ♾️ (Todo Gratis para Avatar)" if is_admin else "Tus Coronas Cosméticas: %d" % crowns
 	_clear_box(_shop_list_box)
 	var cos: Dictionary = NetworkManager.local_profile.get("cosmetics", {}) as Dictionary
 
-	_add_shop_category("ARMADURAS COSMÉTICAS", "armor", GameConfig.COSMETIC_ARMORS, cos.get("owned_armors", []) as Array, str(cos.get("equipped_armor", "")))
-	_add_shop_category("SKINS DE DRAGÓN", "dragon", GameConfig.COSMETIC_DRAGONS, cos.get("owned_dragons", []) as Array, str(cos.get("equipped_dragon", "")))
-	_add_shop_category("ESTELAS DE VUELO DE DRAGÓN", "trail", GameConfig.COSMETIC_TRAILS, cos.get("owned_trails", []) as Array, str(cos.get("equipped_trail", "")))
+	_add_shop_category("ARMADURAS COSMÉTICAS", "armor", GameConfig.COSMETIC_ARMORS, cos.get("owned_armors", []) as Array, str(cos.get("equipped_armor", "")), is_admin)
+	_add_shop_category("SKINS DE DRAGÓN", "dragon", GameConfig.COSMETIC_DRAGONS, cos.get("owned_dragons", []) as Array, str(cos.get("equipped_dragon", "")), is_admin)
+	_add_shop_category("ESTELAS DE VUELO DE DRAGÓN", "trail", GameConfig.COSMETIC_TRAILS, cos.get("owned_trails", []) as Array, str(cos.get("equipped_trail", "")), is_admin)
 
 
-func _add_shop_category(header_text: String, cat: String, catalog: Dictionary, owned: Array, equipped: String) -> void:
+func _add_shop_category(header_text: String, cat: String, catalog: Dictionary, owned: Array, equipped: String, is_admin: bool) -> void:
 	var h: Label = Label.new()
 	h.text = "— " + header_text + " —"
 	h.add_theme_color_override("font_color", Color(1.0, 0.86, 0.42))
@@ -1205,8 +1579,8 @@ func _add_shop_category(header_text: String, cat: String, catalog: Dictionary, o
 		if item_id == equipped:
 			btn.text = "Equipado"
 			btn.disabled = true
-		elif owned.has(item_id):
-			btn.text = "Equipar"
+		elif owned.has(item_id) or is_admin:
+			btn.text = "Equipar (Gratis ♾️)" if is_admin else "Equipar"
 			btn.pressed.connect(func() -> void: NetworkManager.request_cosmetic_action(cat, item_id, "equip"))
 		else:
 			btn.text = "Comprar (%d Coronas)" % int(spec["price_crowns"])

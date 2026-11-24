@@ -60,6 +60,8 @@ directional_shadow_max_distance = 160.0
 
 [node name="Stations" type="Node3D" parent="."]
 
+[node name="Wayshrines" type="Node3D" parent="."]
+
 [node name="Dungeons" type="Node3D" parent="."]
 
 [node name="Bosses" type="Node3D" parent="."]

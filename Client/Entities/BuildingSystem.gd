@@ -98,9 +98,11 @@ func update_preview(camera: Camera3D, player_local_pos: Vector3) -> void:
 	_placement_pos = target_world
 	var player_world: Vector3 = GameConfig.local_to_world(player_local_pos)
 	var dist: float = player_world.distance_to(target_world)
-	var has_resources: bool = _local_has_resources(selected_piece)
+	var is_admin: bool = GameConfig.is_avatar_role(str(NetworkManager.local_profile.get("role", "")))
+	var has_resources: bool = is_admin or _local_has_resources(selected_piece)
 	var above_water: bool = target_world.y >= GameConfig.WATER_LEVEL + 0.2
-	_placement_valid = dist <= max_build_distance and has_resources and above_water
+	var outside_safe: bool = not SafeZone.is_in_safe_zone(target_world)
+	_placement_valid = (dist <= max_build_distance or is_admin) and has_resources and above_water and outside_safe
 
 	if _placement_valid != _last_valid or _last_piece_built != selected_piece:
 		_rebuild_ghost(_placement_valid)

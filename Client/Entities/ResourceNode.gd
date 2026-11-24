@@ -37,8 +37,29 @@ func _refresh_visual() -> void:
 	ProceduralMeshFactory.build_resource_visual(visual_root, resource_type)
 	var item_def: Dictionary = GameConfig.ITEMS.get(resource_type, {}) as Dictionary
 	var display_name: String = str(item_def.get("name", resource_type))
+	var rarity: String = str(item_def.get("rarity", "Común"))
+	var val: int = int(item_def.get("value", 5))
+	var rcol: Color = item_def.get("rarity_col", Color(0.85, 0.9, 1.0)) as Color
+
+	# Luminous rarity aura ring around gatherable nodes for clear visibility
+	var aura_ring: MeshInstance3D = MeshInstance3D.new()
+	aura_ring.name = "RarityAura"
+	var tm: TorusMesh = TorusMesh.new()
+	tm.inner_radius = 0.85
+	tm.outer_radius = 1.02
+	tm.rings = 16
+	tm.ring_segments = 6
+	aura_ring.mesh = tm
+	aura_ring.position = Vector3(0.0, 0.14, 0.0)
+	var amat: StandardMaterial3D = ProceduralMeshFactory.make_pbr_material(rcol, 0.15, 0.0, rcol, 2.2)
+	amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	amat.albedo_color.a = 0.65
+	aura_ring.material_override = amat
+	visual_root.add_child(aura_ring)
+
 	if label_3d != null:
-		label_3d.text = "[E / Y] %s (%d/%d)" % [display_name, remaining_charges, max_charges]
+		label_3d.modulate = rcol
+		label_3d.text = "[E / Y] %s [%s]\nValor ref: %d monedas (%d/%d)" % [display_name, rarity, val, remaining_charges, max_charges]
 
 
 func set_state(charges: int, depleted: bool) -> void:
@@ -52,8 +73,10 @@ func set_state(charges: int, depleted: bool) -> void:
 		collision_shape.disabled = depleted
 	var item_def: Dictionary = GameConfig.ITEMS.get(resource_type, {}) as Dictionary
 	var display_name: String = str(item_def.get("name", resource_type))
+	var rarity: String = str(item_def.get("rarity", "Común"))
+	var val: int = int(item_def.get("value", 5))
 	if label_3d != null:
-		label_3d.text = "[E / Y / Golpear] %s (%d/%d)" % [display_name, remaining_charges, max_charges]
+		label_3d.text = "[E / Y] %s [%s]\nValor ref: %d monedas (%d/%d)" % [display_name, rarity, val, remaining_charges, max_charges]
 
 
 func play_harvest_burst() -> void:

@@ -9,11 +9,16 @@ extends CharacterBody3D
 ##   A jump, B dodge iframes, X dragon/rotate, Y interact, L3 sprint)
 ## - Infinite world & Floating Origin seamless support
 
+signal zone_status_changed(in_safe_zone: bool, zone_name: String)
+
 var peer_id: int = 0
 var is_local: bool = false
 var username: String = ""
 var role: String = GameConfig.ROLE_PLAYER
+var level: int = 1
+var disguised_novice: bool = false
 var class_id: String = "ARCANE_KNIGHT"
+var race_id: String = "HUMAN_VALLEY"
 var philosophy: String = GameConfig.PHILOSOPHY_NEUTRAL
 var armor_skin_id: String = "default_iron"
 var dragon_skin_id: String = "crimson_wyrm"
@@ -26,6 +31,7 @@ var max_mana: float = 100.0
 var mana: float = 100.0
 var max_stamina: float = 100.0
 var stamina: float = 100.0
+var hunger: float = 100.0
 var shield_hp: float = 0.0
 var has_combat_grace: bool = false
 var is_divine_form: bool = false
@@ -34,6 +40,9 @@ var is_blocking: bool = false
 var is_dodging: bool = false
 var is_mounted: bool = false
 var mounted_dragon: DragonController = null
+var _was_in_safe_zone: bool = true
+var _safe_zone_check_accum: float = 0.0
+var _last_anim_played: String = ""
 
 # Elder Scrolls Camera State
 const FP_PIVOT_POS: Vector3 = Vector3(0.0, 1.66, -0.06)
@@ -122,7 +131,10 @@ func _init_local_systems() -> void:
 func apply_full_state(state: Dictionary) -> void:
 	username = str(state.get("username", "Aventurero"))
 	role = str(state.get("role", GameConfig.ROLE_PLAYER))
+	level = int(state.get("level", 1))
+	disguised_novice = bool(state.get("disguised_novice", false))
 	var new_class: String = str(state.get("class_id", "ARCANE_KNIGHT"))
+	var new_race: String = str(state.get("race_id", "HUMAN_VALLEY"))
 	philosophy = str(state.get("philosophy", GameConfig.PHILOSOPHY_NEUTRAL))
 	var new_skin: String = str(state.get("armor_skin", "default_iron"))
 	dragon_skin_id = str(state.get("dragon_skin", "crimson_wyrm"))
@@ -133,6 +145,7 @@ func apply_full_state(state: Dictionary) -> void:
 	mana = float(state.get("mana", max_mana))
 	max_stamina = float(state.get("max_stamina", 100.0))
 	stamina = float(state.get("stamina", max_stamina))
+	hunger = float(state.get("hunger", 100.0))
 	shield_hp = float(state.get("shield_hp", 0.0))
 	has_combat_grace = bool(state.get("has_combat_grace", false))
 	is_divine_form = bool(state.get("is_divine_form", false))
@@ -145,8 +158,9 @@ func apply_full_state(state: Dictionary) -> void:
 		global_position = lp
 		_net_pos = lp
 
-	var needs_rebuild: bool = (new_class != class_id or new_skin != armor_skin_id or _rig.is_empty())
+	var needs_rebuild: bool = (new_class != class_id or new_skin != armor_skin_id or new_race != race_id or _rig.is_empty())
 	class_id = new_class
+	race_id = new_race
 	armor_skin_id = new_skin
 	if is_node_ready():
 		if needs_rebuild:
@@ -160,7 +174,8 @@ func apply_full_state(state: Dictionary) -> void:
 func _rebuild_visual() -> void:
 	if visual_root == null:
 		return
-	_rig = ProceduralMeshFactory.build_humanoid_rig(visual_root, class_id, armor_skin_id)
+	_rig = ProceduralMeshFactory.build_humanoid_rig(visual_root, class_id, armor_skin_id, race_id)
+	_last_anim_played = ""
 	_apply_status_visuals()
 	_update_nameplate()
 
@@ -196,22 +211,23 @@ func _apply_camera_perspective(blend: float) -> void:
 
 func _apply_status_visuals() -> void:
 	var hide_body_for_fp: bool = is_local and is_first_person
+	var show_divine: bool = is_divine_form and not disguised_novice
 
 	var aura: MeshInstance3D = _rig.get("grace_aura", null) as MeshInstance3D
 	if aura != null:
-		aura.visible = (has_combat_grace or is_divine_form) and not hide_body_for_fp
-		if is_divine_form:
+		aura.visible = (has_combat_grace or show_divine) and not hide_body_for_fp
+		if show_divine:
 			aura.material_override = ProceduralMeshFactory.make_grace_aura_material(role == GameConfig.ROLE_AVATAR_CAOS)
 		elif has_combat_grace:
 			aura.material_override = ProceduralMeshFactory.make_grace_aura_material(false)
 
 	var crown: Node3D = _rig.get("divine_crown", null) as Node3D
 	if crown != null:
-		crown.visible = is_divine_form and not hide_body_for_fp
+		crown.visible = show_divine and not hide_body_for_fp
 
 	var body_pivot: Node3D = _rig.get("body_pivot", null) as Node3D
 	if body_pivot != null:
-		var target_scale: float = 1.38 if is_divine_form else 1.0
+		var target_scale: float = 1.38 if show_divine else 1.0
 		body_pivot.scale = Vector3.ONE * target_scale
 		body_pivot.visible = (not hide_body_for_fp) and ((not is_stealthed) or is_local)
 
@@ -222,12 +238,13 @@ func _apply_status_visuals() -> void:
 func _update_nameplate() -> void:
 	if nameplate == null:
 		return
+	var lvl_badge: String = LevelingSystem.format_level_badge(level, role, disguised_novice)
 	var prefix: String = ""
-	if role == GameConfig.ROLE_AVATAR_ORDEN:
-		prefix = "[AVATAR DEL ORDEN]\n"
+	if not disguised_novice and role == GameConfig.ROLE_AVATAR_ORDEN:
+		prefix = "[♾️ AVATAR DEL ORDEN]\n"
 		nameplate.modulate = Color(1.0, 0.88, 0.35)
-	elif role == GameConfig.ROLE_AVATAR_CAOS:
-		prefix = "[AVATAR DEL CAOS]\n"
+	elif not disguised_novice and role == GameConfig.ROLE_AVATAR_CAOS:
+		prefix = "[♾️ AVATAR DEL CAOS]\n"
 		nameplate.modulate = Color(1.0, 0.35, 0.22)
 	elif has_combat_grace:
 		prefix = "★ GRACIA COMBATIVA (x2) ★\n"
@@ -235,7 +252,7 @@ func _update_nameplate() -> void:
 	else:
 		nameplate.modulate = Color(0.92, 0.96, 1.0)
 	var class_name_str: String = str((GameConfig.CLASSES.get(class_id, {}) as Dictionary).get("name", class_id))
-	nameplate.text = "%s%s [%s]\n%s | HP %d/%d" % [prefix, username, philosophy, class_name_str, int(ceilf(hp)), int(max_hp)]
+	nameplate.text = "%s%s %s [%s]\n%s | HP %d/%d" % [prefix, lvl_badge, username, philosophy, class_name_str, int(ceilf(hp)), int(max_hp)]
 	nameplate.visible = (not is_local) and (not is_stealthed)
 
 
@@ -300,6 +317,19 @@ func _physics_process(delta: float) -> void:
 	if is_local:
 		_process_local_controls(delta)
 		_apply_camera_perspective(clampf(delta * 14.0, 0.0, 1.0))
+		_safe_zone_check_accum += delta
+		if _safe_zone_check_accum >= 0.35:
+			_safe_zone_check_accum = 0.0
+			var wp_chk: Vector3 = GameConfig.local_to_world(global_position)
+			var in_safe: bool = SafeZone.is_in_safe_zone(wp_chk)
+			if in_safe != _was_in_safe_zone:
+				_was_in_safe_zone = in_safe
+				var zname: String = SafeZone.get_safe_zone_name(wp_chk)
+				if not in_safe:
+					AudioSynth.play_pvp_warning()
+				else:
+					AudioSynth.play_heal()
+				zone_status_changed.emit(in_safe, zname)
 	else:
 		_process_remote_interpolation(delta)
 
@@ -324,11 +354,9 @@ func _process_local_controls(delta: float) -> void:
 	var ui_captured: bool = Input.mouse_mode != Input.MOUSE_MODE_CAPTURED
 
 	if not ui_captured:
-		# Elder Scrolls Camera Toggle (R3 or V)
 		if Input.is_action_just_pressed("toggle_camera_view"):
 			toggle_camera_view()
 
-		# Build Mode toggle (B or D-Pad Up)
 		if Input.is_action_just_pressed("toggle_build") and not is_mounted and building_system != null:
 			building_system.toggle_build_mode()
 
@@ -343,7 +371,7 @@ func _process_local_controls(delta: float) -> void:
 				building_system.cycle_piece(1)
 			if Input.is_action_just_pressed("attack_primary"):
 				building_system.try_place_current()
-			var piece_keys: Array[String] = ["wall", "gate", "tower", "altar_order", "altar_chaos", "trade_post"]
+			var piece_keys: Array[String] = ["wall", "gate", "tower", "house_foundation", "house_wall", "house_roof", "house_door", "storage_chest", "trade_post"]
 			for pk_idx: int in range(piece_keys.size()):
 				if Input.is_physical_key_pressed(KEY_1 + pk_idx):
 					building_system.select_piece(piece_keys[pk_idx])
@@ -541,16 +569,17 @@ func _perform_primary_attack() -> void:
 
 
 func _perform_ability(slot: int) -> void:
-	if slot < 0 or slot >= 4 or ability_cooldowns[slot] > 0.0:
+	var is_unlimited_admin: bool = GameConfig.is_avatar_role(role) and not disguised_novice
+	if slot < 0 or slot >= 4 or (not is_unlimited_admin and ability_cooldowns[slot] > 0.0):
 		return
 	var class_def: Dictionary = GameConfig.CLASSES.get(class_id, {}) as Dictionary
 	var abilities: Array = class_def.get("abilities", []) as Array
 	if slot >= abilities.size():
 		return
 	var ab: Dictionary = abilities[slot] as Dictionary
-	if mana < float(ab.get("cost_mana", 0.0)) or stamina < float(ab.get("cost_stamina", 0.0)):
+	if not is_unlimited_admin and (mana < float(ab.get("cost_mana", 0.0)) or stamina < float(ab.get("cost_stamina", 0.0))):
 		return
-	ability_cooldowns[slot] = float(ab.get("cooldown", 4.0))
+	ability_cooldowns[slot] = 0.0 if is_unlimited_admin else float(ab.get("cooldown", 4.0))
 	_attack_anim_timer = 0.35
 	visual_root.rotation.y = _camera_yaw
 	var aim_dir: Vector3 = _get_crosshair_aim_dir()
@@ -597,7 +626,40 @@ func _try_interact() -> void:
 			AudioSynth.play_ui_click()
 		return
 
-	# 2. Dungeon Entrances / Exits
+	# 2. Player House Storage Chests (60-slot lockable storage)
+	best_dist = 5.5
+	var nearest_chest: StorageChest = null
+	for node: Node in get_tree().get_nodes_in_group("storage_chests"):
+		var sc: StorageChest = node as StorageChest
+		var d: float = global_position.distance_to(sc.global_position)
+		if d < best_dist:
+			best_dist = d
+			nearest_chest = sc
+	if nearest_chest != null:
+		NetworkManager.request_open_chest(nearest_chest.building_id)
+		AudioSynth.play_ui_click()
+		return
+
+	# 3. Discoverable Wayshrines (Fast Travel Altars)
+	best_dist = 6.5
+	var nearest_ws: Wayshrine = null
+	for node: Node in get_tree().get_nodes_in_group("wayshrines"):
+		var ws_node: Wayshrine = node as Wayshrine
+		var d: float = global_position.distance_to(ws_node.global_position)
+		if d < best_dist:
+			best_dist = d
+			nearest_ws = ws_node
+	if nearest_ws != null:
+		var wa_ws: Node = get_tree().get_first_node_in_group("world_authority")
+		if wa_ws != null and wa_ws.has_method("request_discover_wayshrine"):
+			wa_ws.call("request_discover_wayshrine", nearest_ws.wayshrine_id)
+		var hud_ws: Node = get_tree().get_first_node_in_group("game_hud")
+		if hud_ws != null and hud_ws.has_method("open_world_map"):
+			hud_ws.call("open_world_map")
+		AudioSynth.play_heal()
+		return
+
+	# 4. Dungeon Entrances / Exits
 	best_dist = 6.0
 	var nearest_dungeon: DungeonEntrance = null
 	for node: Node in get_tree().get_nodes_in_group("dungeon_portals"):
@@ -613,7 +675,7 @@ func _try_interact() -> void:
 			AudioSynth.play_heal()
 		return
 
-	# 3. Physical Settlement Stations (Blacksmith Forge, Alchemy Bench, Shop Stall)
+	# 5. Physical Settlement Stations (Blacksmith Forge, Alchemy Bench, Campfire, Market Board)
 	best_dist = 5.8
 	var nearest_station: WorldStation = null
 	for node: Node in get_tree().get_nodes_in_group("world_stations"):
@@ -628,18 +690,20 @@ func _try_interact() -> void:
 			hud.call("open_station_panel", nearest_station.station_type)
 		return
 
-	# 4. Player-built gates & trade posts
+	# 6. Player-built gates, house doors & trade posts
 	best_dist = 5.5
 	var nearest_build: BuildPiece = null
 	for node: Node in get_tree().get_nodes_in_group("buildings"):
+		if not (node is BuildPiece):
+			continue
 		var bp: BuildPiece = node as BuildPiece
-		if bp.piece_type == "gate" or bp.piece_type == "trade_post":
+		if bp.piece_type == "gate" or bp.piece_type == "house_door" or bp.piece_type == "trade_post":
 			var d: float = global_position.distance_to(bp.global_position)
 			if d < best_dist:
 				best_dist = d
 				nearest_build = bp
 	if nearest_build != null:
-		if nearest_build.piece_type == "gate":
+		if nearest_build.piece_type == "gate" or nearest_build.piece_type == "house_door":
 			var ba: Node = get_tree().get_first_node_in_group("building_authority")
 			if ba != null and ba.has_method("request_toggle_gate"):
 				ba.call("request_toggle_gate", nearest_build.building_id)
@@ -650,7 +714,7 @@ func _try_interact() -> void:
 				hud_m.call("open_trade_market")
 		return
 
-	# 5. Gatherable Resource Nodes
+	# 7. Gatherable Resource Nodes
 	best_dist = 5.8
 	var nearest_res: ResourceNode = null
 	for node: Node in get_tree().get_nodes_in_group("resource_nodes"):
@@ -720,7 +784,6 @@ func set_mounted_dragon(dragon: DragonController) -> void:
 	mounted_dragon = dragon
 	is_mounted = dragon != null
 	if not is_mounted and prev_dragon != null:
-		# Dismount orientation fix: inherit dragon yaw on camera pivot & face player forward (-Z)
 		var exit_yaw: float = prev_dragon.yaw_angle if is_local else prev_dragon.rotation.y
 		rotation = Vector3.ZERO
 		_camera_yaw = exit_yaw
@@ -765,7 +828,45 @@ func _animate_fp_viewmodel(delta: float) -> void:
 	lh.rotation_degrees = lh.rotation_degrees.lerp(lh_target_rot, clampf(delta * 16.0, 0.0, 1.0))
 
 
+func _play_rig_anim(ap: AnimationPlayer, anim_name: String, loop: bool = true) -> void:
+	if not ap.has_animation(anim_name):
+		return
+	if _last_anim_played == anim_name and ap.is_playing():
+		return
+	var anim: Animation = ap.get_animation(anim_name)
+	if anim != null:
+		anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+	ap.play(anim_name, 0.12)
+	_last_anim_played = anim_name
+
+
 func _animate_humanoid(delta: float) -> void:
+	var horiz_speed: float = Vector2(velocity.x, velocity.z).length() if is_local else _net_anim_speed
+	var attacking: bool = (_attack_anim_timer > 0.0) if is_local else _net_attacking
+	if horiz_speed > 0.35:
+		_walk_phase += delta * clampf(horiz_speed * 1.45, 5.0, 14.0)
+
+	# Drive real KayKit .glb AnimationPlayer when present
+	var ap: AnimationPlayer = _rig.get("anim_player", null) as AnimationPlayer
+	if ap != null:
+		if is_mounted:
+			_play_rig_anim(ap, "Sit_Chair_Idle" if ap.has_animation("Sit_Chair_Idle") else "Idle", true)
+		elif is_dodging:
+			_play_rig_anim(ap, "Dodge_Forward" if ap.has_animation("Dodge_Forward") else "Running_A", false)
+		elif attacking:
+			var atk_anim: String = "Spellcast_Shoot" if (class_id == "PYROMANCER" or class_id == "CLERIC_ORDER") else "1H_Melee_Attack_Slice_Horizontal"
+			_play_rig_anim(ap, atk_anim if ap.has_animation(atk_anim) else "Idle", false)
+		elif is_blocking and ap.has_animation("Block"):
+			_play_rig_anim(ap, "Block", true)
+		elif horiz_speed > 6.8 and ap.has_animation("Running_A"):
+			_play_rig_anim(ap, "Running_A", true)
+		elif horiz_speed > 0.35 and ap.has_animation("Walking_A"):
+			_play_rig_anim(ap, "Walking_A", true)
+		else:
+			_play_rig_anim(ap, "Idle", true)
+		return
+
+	# Procedural fallback limb animation
 	var leg_l: Node3D = _rig.get("leg_l", null) as Node3D
 	var leg_r: Node3D = _rig.get("leg_r", null) as Node3D
 	var arm_l: Node3D = _rig.get("arm_l", null) as Node3D
@@ -776,9 +877,6 @@ func _animate_humanoid(delta: float) -> void:
 
 	if leg_l == null or arm_r == null or body_pivot == null:
 		return
-
-	var horiz_speed: float = Vector2(velocity.x, velocity.z).length() if is_local else _net_anim_speed
-	var attacking: bool = (_attack_anim_timer > 0.0) if is_local else _net_attacking
 
 	if is_mounted:
 		leg_l.rotation_degrees = Vector3(-55.0, 0.0, -24.0)
@@ -796,7 +894,6 @@ func _animate_humanoid(delta: float) -> void:
 		body_pivot.rotation_degrees.x = lerpf(body_pivot.rotation_degrees.x, 0.0, delta * 12.0)
 
 	if horiz_speed > 0.35:
-		_walk_phase += delta * clampf(horiz_speed * 1.45, 5.0, 14.0)
 		var swing: float = sin(_walk_phase) * 34.0
 		leg_l.rotation_degrees = Vector3(swing, 0.0, 0.0)
 		leg_r.rotation_degrees = Vector3(-swing, 0.0, 0.0)

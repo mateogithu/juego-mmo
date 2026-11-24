@@ -84,7 +84,7 @@ func set_gate_open(open_state: bool) -> void:
 
 
 func _update_gate_state() -> void:
-	if piece_type != "gate":
+	if piece_type != "gate" and piece_type != "house_door":
 		return
 	if _door_pivot != null:
 		_door_pivot.rotation_degrees.y = -95.0 if is_open else 0.0
@@ -98,7 +98,7 @@ func _update_label() -> void:
 	var spec: Dictionary = GameConfig.BUILD_PIECES.get(piece_type, {}) as Dictionary
 	var display_name: String = str(spec.get("name", piece_type))
 	var hint: String = ""
-	if piece_type == "gate":
+	if piece_type == "gate" or piece_type == "house_door":
 		hint = " [E: %s]" % ("Cerrar" if is_open else "Abrir")
 	elif piece_type == "trade_post":
 		hint = " [E: Mercado]"
