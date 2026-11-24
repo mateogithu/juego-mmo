@@ -1,0 +1,25 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Client/Entities/ResourceNode.gd" id="1_res"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_res"]
+height = 2.6
+radius = 1.15
+
+[node name="ResourceNode" type="StaticBody3D"]
+collision_layer = 33
+collision_mask = 0
+script = ExtResource("1_res")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.3, 0)
+shape = SubResource("CylinderShape3D_res")
+
+[node name="VisualRoot" type="Node3D" parent="."]
+
+[node name="Label3D" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3.2, 0)
+billboard = 1
+text = "[E] Recurso"
+font_size = 24
+outline_size = 6

@@ -1,0 +1,229 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://Client/UI/MainMenu.gd" id="1_menu"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_card"]
+bg_color = Color(0.09, 0.11, 0.17, 0.94)
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.78, 0.62, 0.28, 0.78)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+content_margin_left = 18.0
+content_margin_top = 16.0
+content_margin_right = 18.0
+content_margin_bottom = 16.0
+
+[node name="MainMenu" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_menu")
+
+[node name="Bg" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.05, 0.07, 0.11, 1)
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 48
+theme_override_constants/margin_top = 28
+theme_override_constants/margin_right = 48
+theme_override_constants/margin_bottom = 24
+
+[node name="RootVBox" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Margin/RootVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.4, 1)
+theme_override_font_sizes/font_size = 34
+text = "CRÓNICAS DEL ORDEN Y EL CAOS"
+horizontal_alignment = 1
+
+[node name="Sub" type="Label" parent="Margin/RootVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.76, 0.81, 0.9, 1)
+theme_override_font_sizes/font_size = 14
+text = "MMORPG Sandbox Medieval • Dragones Voladores • Combate Libre sin Equilibrio de Nivel • 100% Impulsado por Jugadores"
+horizontal_alignment = 1
+
+[node name="Columns" type="HBoxContainer" parent="Margin/RootVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 20
+
+[node name="LeftCard" type="PanelContainer" parent="Margin/RootVBox/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="LeftVBox" type="VBoxContainer" parent="Margin/RootVBox/Columns/LeftCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Sec1" type="Label" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.4, 1)
+theme_override_font_sizes/font_size = 18
+text = "Cuenta y Conexión"
+
+[node name="UserLabel" type="Label" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+text = "Nombre de Personaje / Cuenta:"
+
+[node name="UserInput" type="LineEdit" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+placeholder_text = "Ej: Aldric, AvatarOrden, AvatarCaos"
+
+[node name="PassLabel" type="Label" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+text = "Contraseña:"
+
+[node name="PassInput" type="LineEdit" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+placeholder_text = "Mínimo 4 caracteres"
+secret = true
+
+[node name="RegisterCheck" type="CheckButton" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+button_pressed = true
+text = "Crear Nueva Cuenta (desactivá para Iniciar Sesión)"
+
+[node name="AvatarHint" type="Label" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.78, 0.88, 1)
+theme_override_font_sizes/font_size = 12
+text = "Avatares de Creadores (iniciar sesión): AvatarOrden / orden_creador  |  AvatarCaos / caos_creador"
+autowrap_mode = 3
+
+[node name="NetGrid" type="GridContainer" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+columns = 2
+
+[node name="HostLbl" type="Label" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/NetGrid"]
+layout_mode = 2
+text = "IP del Servidor:"
+
+[node name="PortLbl" type="Label" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/NetGrid"]
+layout_mode = 2
+text = "Puerto UDP:"
+
+[node name="HostInput" type="LineEdit" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/NetGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "127.0.0.1"
+
+[node name="PortInput" type="SpinBox" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/NetGrid"]
+layout_mode = 2
+min_value = 1024.0
+max_value = 65535.0
+value = 7777.0
+
+[node name="ButtonsBox" type="VBoxContainer" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="HostBtn" type="Button" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/ButtonsBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+focus_neighbor_bottom = NodePath("../ConnectBtn")
+focus_neighbor_right = NodePath("../../../../RightCard/RightVBox/ClassOption")
+text = "Crear Partida Host (Servidor + Cliente)"
+
+[node name="ConnectBtn" type="Button" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/ButtonsBox"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+focus_neighbor_top = NodePath("../HostBtn")
+focus_neighbor_bottom = NodePath("../DedicatedBtn")
+focus_neighbor_right = NodePath("../../../../RightCard/RightVBox/ClassOption")
+text = "Conectar a Servidor (IP:Puerto)"
+
+[node name="DedicatedBtn" type="Button" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox/ButtonsBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_neighbor_top = NodePath("../ConnectBtn")
+focus_neighbor_bottom = NodePath("../../LoreBtn")
+focus_neighbor_right = NodePath("../../../../RightCard/RightVBox/ArmorOption")
+text = "Lanzar Servidor Dedicado (Solo Servidor)"
+
+[node name="LoreBtn" type="Button" parent="Margin/RootVBox/Columns/LeftCard/LeftVBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+focus_neighbor_top = NodePath("../ButtonsBox/DedicatedBtn")
+focus_neighbor_right = NodePath("../../../RightCard/RightVBox/DragonOption")
+text = "Crónicas del Mundo (Mitología Oficial)"
+
+[node name="RightCard" type="PanelContainer" parent="Margin/RootVBox/Columns"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_styles/panel = SubResource("StyleBoxFlat_card")
+
+[node name="RightVBox" type="VBoxContainer" parent="Margin/RootVBox/Columns/RightCard"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="Sec2" type="Label" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.86, 0.4, 1)
+theme_override_font_sizes/font_size = 18
+text = "Clase Medieval y Apariencia (0% Pay-to-Win)"
+
+[node name="ClassLbl" type="Label" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+text = "Clase (para nuevas cuentas):"
+
+[node name="ClassOption" type="OptionButton" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+focus_neighbor_left = NodePath("../../../LeftCard/LeftVBox/ButtonsBox/HostBtn")
+focus_neighbor_bottom = NodePath("../ArmorOption")
+
+[node name="ClassDesc" type="RichTextLabel" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+custom_minimum_size = Vector2(0, 210)
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+text = ""
+
+[node name="ArmorLbl" type="Label" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+text = "Skin Cosmética de Armadura (solo visual):"
+
+[node name="ArmorOption" type="OptionButton" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+focus_neighbor_left = NodePath("../../../LeftCard/LeftVBox/ButtonsBox/HostBtn")
+focus_neighbor_top = NodePath("../ClassOption")
+focus_neighbor_bottom = NodePath("../DragonOption")
+
+[node name="DragonLbl" type="Label" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+text = "Skin Cosmética de Dragón (solo visual):"
+
+[node name="DragonOption" type="OptionButton" parent="Margin/RootVBox/Columns/RightCard/RightVBox"]
+layout_mode = 2
+focus_neighbor_left = NodePath("../../../LeftCard/LeftVBox/ButtonsBox/HostBtn")
+focus_neighbor_top = NodePath("../ArmorOption")
+
+[node name="StatusLabel" type="Label" parent="Margin/RootVBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.88, 1, 1)
+text = "Listo. Elegí 'Crear Partida Host' para jugar y alojar a otros, o 'Conectar a Servidor' desde una segunda ventana."
+horizontal_alignment = 1
