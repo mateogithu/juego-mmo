@@ -54,12 +54,21 @@ static func update_shader_origin_offset(offset: Vector3) -> void:
 static func _ensure_shared_foliage_meshes() -> void:
 	if _pine_mesh != null:
 		return
-	_pine_mesh = _build_pine_tree_mesh()
-	_oak_mesh = _build_oak_tree_mesh()
-	_rock_mesh = _build_organic_rock_mesh()
+	_pine_mesh = ProceduralMeshFactory.get_shared_pine_mesh()
+	_oak_mesh = ProceduralMeshFactory.get_shared_oak_mesh()
+	_rock_mesh = ProceduralMeshFactory.get_shared_rock_mesh()
 	_grass_mesh = _build_grass_tuft_mesh()
 	_grass_mat = ShaderMaterial.new()
 	_grass_mat.shader = GRASS_WIND_SHADER
+
+
+static func _is_inside_any_sanctuary(wx: float, wz: float, margin: float) -> bool:
+	for sdef: Dictionary in GameConfig.SAFE_ZONES:
+		var c: Vector2 = sdef.get("center_xz", Vector2.ZERO) as Vector2
+		var r: float = float(sdef.get("radius", 34.0)) + margin
+		if Vector2(wx, wz).distance_to(c) < r:
+			return true
+	return false
 
 
 func build_chunk(coord: Vector2i, lod_step: int = 1) -> void:
@@ -176,8 +185,8 @@ func _populate_multimesh_foliage(coord: Vector2i, origin_x: float, origin_z: flo
 		var lz: float = rng.randf_range(2.0, GameConfig.CHUNK_SIZE - 2.0)
 		var wx: float = origin_x + lx
 		var wz: float = origin_z + lz
-		# Keep central valley settlement plaza open
-		if sqrt(wx * wx + wz * wz) < 30.0:
+		# Keep both walled Safe Zones clear of wild trees
+		if _is_inside_any_sanctuary(wx, wz, 4.0):
 			continue
 		var wy: float = GameConfig.sample_terrain_height(wx, wz)
 		var n: Vector3 = GameConfig.sample_terrain_normal(wx, wz)
@@ -197,7 +206,7 @@ func _populate_multimesh_foliage(coord: Vector2i, origin_x: float, origin_z: flo
 		var lz: float = rng.randf_range(2.0, GameConfig.CHUNK_SIZE - 2.0)
 		var wx: float = origin_x + lx
 		var wz: float = origin_z + lz
-		if sqrt(wx * wx + wz * wz) < 26.0:
+		if _is_inside_any_sanctuary(wx, wz, 3.0):
 			continue
 		var wy: float = GameConfig.sample_terrain_height(wx, wz)
 		if wy < GameConfig.WATER_LEVEL - 0.5:
@@ -213,7 +222,7 @@ func _populate_multimesh_foliage(coord: Vector2i, origin_x: float, origin_z: flo
 			var lz: float = rng.randf_range(1.0, GameConfig.CHUNK_SIZE - 1.0)
 			var wx: float = origin_x + lx
 			var wz: float = origin_z + lz
-			if sqrt(wx * wx + wz * wz) < 16.0:
+			if _is_inside_any_sanctuary(wx, wz, 0.5):
 				continue
 			var wy: float = GameConfig.sample_terrain_height(wx, wz)
 			var n: Vector3 = GameConfig.sample_terrain_normal(wx, wz)
@@ -245,105 +254,6 @@ func _spawn_multimesh(node_name: String, mesh: Mesh, mat_override: Material, xfo
 		mmi.material_override = mat_override
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if cast_shadows else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	foliage_root.add_child(mmi)
-
-
-# --- Organic Sculpted MultiMesh Builders (Zero BoxMesh) ---
-
-static func _append_cone(st: SurfaceTool, base_y: float, top_y: float, base_r: float, top_r: float, segs: int, color: Color) -> void:
-	st.set_color(color)
-	for i: int in range(segs):
-		var a0: float = (float(i) / float(segs)) * TAU
-		var a1: float = (float(i + 1) / float(segs)) * TAU
-		var b0: Vector3 = Vector3(cos(a0) * base_r, base_y, sin(a0) * base_r)
-		var b1: Vector3 = Vector3(cos(a1) * base_r, base_y, sin(a1) * base_r)
-		var t0: Vector3 = Vector3(cos(a0) * top_r, top_y, sin(a0) * top_r)
-		var t1: Vector3 = Vector3(cos(a1) * top_r, top_y, sin(a1) * top_r)
-		st.add_vertex(b0)
-		st.add_vertex(t1)
-		st.add_vertex(t0)
-		st.add_vertex(b0)
-		st.add_vertex(b1)
-		st.add_vertex(t1)
-
-
-static func _build_pine_tree_mesh() -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-	_append_cone(st, 0.0, 2.8, 0.36, 0.14, 7, Color(0.28, 0.19, 0.12))
-	_append_cone(st, 1.9, 4.6, 2.1, 0.25, 8, Color(0.11, 0.27, 0.13))
-	_append_cone(st, 3.6, 6.2, 1.65, 0.18, 8, Color(0.14, 0.33, 0.15))
-	_append_cone(st, 5.1, 7.6, 1.15, 0.02, 8, Color(0.18, 0.38, 0.17))
-	st.index()
-	st.generate_normals()
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.86
-	st.set_material(mat)
-	return st.commit()
-
-
-static func _build_oak_tree_mesh() -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-	_append_cone(st, 0.0, 3.2, 0.44, 0.22, 8, Color(0.32, 0.22, 0.14))
-	# Organic rounded leafy crown spheres merged into one vertex-colored mesh
-	var crown_blobs: Array = [
-		[Vector3(0.0, 4.4, 0.0), 2.15, Color(0.18, 0.38, 0.14)],
-		[Vector3(1.2, 3.8, 0.7), 1.5, Color(0.22, 0.43, 0.16)],
-		[Vector3(-1.1, 4.0, -0.6), 1.6, Color(0.15, 0.34, 0.13)],
-		[Vector3(0.2, 5.4, -0.3), 1.4, Color(0.25, 0.46, 0.17)]
-	]
-	for blob_var: Variant in crown_blobs:
-		var blob: Array = blob_var as Array
-		_append_displaced_sphere(st, blob[0] as Vector3, float(blob[1]), 7, 5, 0.18, blob[2] as Color)
-	st.index()
-	st.generate_normals()
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.84
-	st.set_material(mat)
-	return st.commit()
-
-
-static func _append_displaced_sphere(st: SurfaceTool, center: Vector3, radius: float, segs: int, rings: int, jitter: float, color: Color) -> void:
-	st.set_color(color)
-	var grid: Array[Vector3] = []
-	for r: int in range(rings + 1):
-		var phi: float = (float(r) / float(rings)) * PI
-		for s: int in range(segs + 1):
-			var theta: float = (float(s) / float(segs)) * TAU
-			var dir: Vector3 = Vector3(sin(phi) * cos(theta), cos(phi), sin(phi) * sin(theta))
-			var disp: float = 1.0 + sin(dir.x * 5.2 + dir.y * 4.1) * cos(dir.z * 5.7) * jitter
-			grid.append(center + dir * radius * disp)
-	var stride: int = segs + 1
-	for r: int in range(rings):
-		for s: int in range(segs):
-			var i00: int = r * stride + s
-			var i10: int = i00 + 1
-			var i01: int = i00 + stride
-			var i11: int = i01 + 1
-			st.add_vertex(grid[i00])
-			st.add_vertex(grid[i10])
-			st.add_vertex(grid[i11])
-			st.add_vertex(grid[i00])
-			st.add_vertex(grid[i11])
-			st.add_vertex(grid[i01])
-
-
-static func _build_organic_rock_mesh() -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-	_append_displaced_sphere(st, Vector3(0.0, 0.45, 0.0), 0.95, 9, 6, 0.28, Color(0.42, 0.42, 0.45))
-	st.index()
-	st.generate_normals()
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.vertex_color_use_as_albedo = true
-	mat.roughness = 0.9
-	st.set_material(mat)
-	return st.commit()
 
 
 static func _build_grass_tuft_mesh() -> ArrayMesh:

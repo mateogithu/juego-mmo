@@ -94,29 +94,45 @@ func _update_label() -> void:
 	label_3d.text = "☠ %s ☠\nHP: %d / %d" % [boss_name, int(ceilf(hp)), int(max_hp)]
 
 
+var _last_boss_anim: String = ""
+
+
+func _play_boss_anim(ap: AnimationPlayer, anim_name: String, loop: bool = true, speed_scale: float = 1.0) -> void:
+	if ap == null or not ap.has_animation(anim_name):
+		return
+	ap.speed_scale = speed_scale
+	if _last_boss_anim == anim_name and ap.is_playing():
+		return
+	var anim: Animation = ap.get_animation(anim_name)
+	if anim != null:
+		anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
+	ap.play(anim_name, 0.16)
+	_last_boss_anim = anim_name
+
+
 func _process(delta: float) -> void:
 	if not is_alive:
 		return
 	_anim_t += delta
+	var move_dist: float = global_position.distance_to(_net_pos)
 	global_position = global_position.lerp(_net_pos, clampf(delta * 8.0, 0.0, 1.0))
 	visual_root.rotation.y = lerp_angle(visual_root.rotation.y, _net_yaw, clampf(delta * 8.0, 0.0, 1.0))
 
-	var arm_r: Node3D = _rig.get("arm_r", null) as Node3D
-	var arm_l: Node3D = _rig.get("arm_l", null) as Node3D
-	if arm_r != null:
-		arm_r.rotation_degrees.x = sin(_anim_t * 2.4) * 20.0 - (48.0 if _telegraph_timer > 0.0 else 0.0)
-	if arm_l != null:
-		arm_l.rotation_degrees.x = -sin(_anim_t * 2.4) * 16.0 - (38.0 if _telegraph_timer > 0.0 else 0.0)
-
-	# Animate wyrm wings if Wyrm boss
-	var drig: Dictionary = _rig.get("dragon_rig", {}) as Dictionary
-	if not drig.is_empty():
-		var wl: Node3D = drig.get("wing_l_root", null) as Node3D
-		var wr: Node3D = drig.get("wing_r_root", null) as Node3D
-		if wl != null and wr != null:
-			var beat: float = sin(_anim_t * 3.8) * 32.0
-			wl.rotation_degrees.z = beat
-			wr.rotation_degrees.z = -beat
+	var ap: AnimationPlayer = _rig.get("anim_player", null) as AnimationPlayer
+	var is_wyrm: bool = bool(_rig.get("is_wyrm", false))
+	if ap != null:
+		if is_wyrm:
+			if _telegraph_timer > 0.0 and ap.has_animation("Dragon_Hit"):
+				_play_boss_anim(ap, "Dragon_Hit", true, 1.1)
+			else:
+				_play_boss_anim(ap, "Dragon_Flying", true, 1.05 if move_dist > 0.2 else 0.72)
+		else:
+			if _telegraph_timer > 0.0 and ap.has_animation("2H_Melee_Attack_Spin"):
+				_play_boss_anim(ap, "2H_Melee_Attack_Spin", true, 1.25)
+			elif move_dist > 0.18 and ap.has_animation("Walking_A"):
+				_play_boss_anim(ap, "Walking_A", true, 1.05)
+			else:
+				_play_boss_anim(ap, "Idle", true, 0.85)
 
 	if _telegraph_timer > 0.0:
 		_telegraph_timer -= delta

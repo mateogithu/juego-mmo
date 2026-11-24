@@ -28,8 +28,14 @@ func _process(delta: float) -> void:
 			save_database()
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
+		if not data.is_empty():
+			save_database()
+
+
 func _exit_tree() -> void:
-	if _dirty and not data.is_empty():
+	if not data.is_empty():
 		save_database()
 
 
@@ -49,6 +55,8 @@ func load_database() -> void:
 		_migrate_legacy_buildings_to_chunks()
 		_migrate_accounts_v2()
 		_seed_creator_avatars()
+		if _dirty:
+			save_database()
 	GameConfig.set_world_seed(int(data.get("world_seed", GameConfig.world_seed)))
 	print("[DatabaseManager] DB v2.0 loaded (seed=%d, %d accounts, %d delta chunks, season #%d)." % [
 		GameConfig.world_seed,
@@ -206,48 +214,85 @@ func _migrate_accounts_v2() -> void:
 			acc["food_buff_until"] = 0.0
 		if not acc.has("discovered_wayshrines"):
 			acc["discovered_wayshrines"] = ["ws_alba", "ws_caos"]
-		for slot_key: String in ["equipped_helmet", "equipped_chest", "equipped_legs", "equipped_boots", "equipped_weapon"]:
+		for slot_key: String in ["equipped_helmet", "equipped_chest", "equipped_legs", "equipped_boots", "equipped_weapon", "equipped_mount"]:
 			if not acc.has(slot_key):
 				acc[slot_key] = ""
+		if not acc.has("dragon_summoned"):
+			acc["dragon_summoned"] = false
+		if not acc.has("inventory") or typeof(acc["inventory"]) != TYPE_DICTIONARY:
+			acc["inventory"] = {}
+		var inv_m: Dictionary = acc["inventory"] as Dictionary
+		if int(inv_m.get("dragon_mount_stone", 0)) > 0 and str(acc.get("equipped_mount", "")).is_empty():
+			acc["equipped_mount"] = "dragon_mount_stone"
 
 
 func _seed_creator_avatars() -> void:
 	var accounts: Dictionary = data["accounts"] as Dictionary
+	var changed: bool = false
 	if not accounts.has("avatarorden"):
 		var res_o: Dictionary = register_account("AvatarOrden", "orden_creador", "ARCANE_KNIGHT", GameConfig.ROLE_AVATAR_ORDEN, "ASTRAL_ELF", _default_appearance("ASTRAL_ELF"))
 		if bool(res_o.get("ok", false)):
-			var acc_o: Dictionary = accounts["avatarorden"] as Dictionary
-			acc_o["philosophy"] = GameConfig.PHILOSOPHY_ORDER
-			acc_o["alignment_score"] = 100
-			acc_o["crowns"] = 999999
-			acc_o["gold"] = 50000
-			var inv_o: Dictionary = acc_o["inventory"] as Dictionary
+			changed = true
+	if accounts.has("avatarorden"):
+		var acc_o: Dictionary = accounts["avatarorden"] as Dictionary
+		acc_o["role"] = GameConfig.ROLE_AVATAR_ORDEN
+		acc_o["philosophy"] = GameConfig.PHILOSOPHY_ORDER
+		acc_o["alignment_score"] = 100
+		acc_o["crowns"] = maxi(999999, int(acc_o.get("crowns", 0)))
+		acc_o["gold"] = maxi(50000, int(acc_o.get("gold", 0)))
+		var inv_o: Dictionary = acc_o.get("inventory", {}) as Dictionary
+		if int(inv_o.get("dragon_mount_stone", 0)) < 1:
 			inv_o["dragon_mount_stone"] = 1
-			var cos_o: Dictionary = acc_o["cosmetics"] as Dictionary
-			cos_o["owned_armors"] = ["default_iron", "order_paladin_gold", "astral_silver", "royal_crimson", "chaos_obsidian"]
-			cos_o["owned_dragons"] = ["crimson_wyrm", "celestial_white", "azure_drake", "emerald_ancient", "abyssal_black"]
-			cos_o["owned_trails"] = ["none", "golden_order", "starlight_ribbon", "ember_sparks", "shadow_mist"]
+			changed = true
+		acc_o["inventory"] = inv_o
+		if str(acc_o.get("equipped_mount", "")) != "dragon_mount_stone":
+			acc_o["equipped_mount"] = "dragon_mount_stone"
+			changed = true
+		var cos_o: Dictionary = acc_o.get("cosmetics", {}) as Dictionary
+		cos_o["owned_armors"] = ["default_iron", "order_paladin_gold", "astral_silver", "royal_crimson", "chaos_obsidian"]
+		cos_o["owned_dragons"] = ["crimson_wyrm", "celestial_white", "azure_drake", "emerald_ancient", "abyssal_black"]
+		cos_o["owned_trails"] = ["none", "golden_order", "starlight_ribbon", "ember_sparks", "shadow_mist"]
+		if str(cos_o.get("equipped_armor", "")).is_empty() or str(cos_o.get("equipped_armor", "")) == "default_iron":
 			cos_o["equipped_armor"] = "order_paladin_gold"
+		if str(cos_o.get("equipped_dragon", "")).is_empty() or str(cos_o.get("equipped_dragon", "")) == "crimson_wyrm":
 			cos_o["equipped_dragon"] = "celestial_white"
+		if str(cos_o.get("equipped_trail", "")).is_empty() or str(cos_o.get("equipped_trail", "")) == "none":
 			cos_o["equipped_trail"] = "golden_order"
+		acc_o["cosmetics"] = cos_o
 
 	if not accounts.has("avatarcaos"):
 		var res_c: Dictionary = register_account("AvatarCaos", "caos_creador", "PYROMANCER", GameConfig.ROLE_AVATAR_CAOS, "DRACONID", _default_appearance("DRACONID"))
 		if bool(res_c.get("ok", false)):
-			var acc_c: Dictionary = accounts["avatarcaos"] as Dictionary
-			acc_c["philosophy"] = GameConfig.PHILOSOPHY_CHAOS
-			acc_c["alignment_score"] = -100
-			acc_c["crowns"] = 999999
-			acc_c["gold"] = 50000
-			var inv_c: Dictionary = acc_c["inventory"] as Dictionary
+			changed = true
+	if accounts.has("avatarcaos"):
+		var acc_c: Dictionary = accounts["avatarcaos"] as Dictionary
+		acc_c["role"] = GameConfig.ROLE_AVATAR_CAOS
+		acc_c["philosophy"] = GameConfig.PHILOSOPHY_CHAOS
+		acc_c["alignment_score"] = -100
+		acc_c["crowns"] = maxi(999999, int(acc_c.get("crowns", 0)))
+		acc_c["gold"] = maxi(50000, int(acc_c.get("gold", 0)))
+		var inv_c: Dictionary = acc_c.get("inventory", {}) as Dictionary
+		if int(inv_c.get("dragon_mount_stone", 0)) < 1:
 			inv_c["dragon_mount_stone"] = 1
-			var cos_c: Dictionary = acc_c["cosmetics"] as Dictionary
-			cos_c["owned_armors"] = ["default_iron", "chaos_obsidian", "royal_crimson", "astral_silver", "order_paladin_gold"]
-			cos_c["owned_dragons"] = ["crimson_wyrm", "abyssal_black", "azure_drake", "emerald_ancient", "celestial_white"]
-			cos_c["owned_trails"] = ["none", "ember_sparks", "shadow_mist", "starlight_ribbon", "golden_order"]
+			changed = true
+		acc_c["inventory"] = inv_c
+		if str(acc_c.get("equipped_mount", "")) != "dragon_mount_stone":
+			acc_c["equipped_mount"] = "dragon_mount_stone"
+			changed = true
+		var cos_c: Dictionary = acc_c.get("cosmetics", {}) as Dictionary
+		cos_c["owned_armors"] = ["default_iron", "chaos_obsidian", "royal_crimson", "astral_silver", "order_paladin_gold"]
+		cos_c["owned_dragons"] = ["crimson_wyrm", "abyssal_black", "azure_drake", "emerald_ancient", "celestial_white"]
+		cos_c["owned_trails"] = ["none", "ember_sparks", "shadow_mist", "starlight_ribbon", "golden_order"]
+		if str(cos_c.get("equipped_armor", "")).is_empty() or str(cos_c.get("equipped_armor", "")) == "default_iron":
 			cos_c["equipped_armor"] = "chaos_obsidian"
+		if str(cos_c.get("equipped_dragon", "")).is_empty() or str(cos_c.get("equipped_dragon", "")) == "crimson_wyrm":
 			cos_c["equipped_dragon"] = "abyssal_black"
+		if str(cos_c.get("equipped_trail", "")).is_empty() or str(cos_c.get("equipped_trail", "")) == "none":
 			cos_c["equipped_trail"] = "ember_sparks"
+		acc_c["cosmetics"] = cos_c
+
+	if changed:
+		mark_dirty()
 
 
 func _hash_password(password: String, salt: String) -> String:
@@ -327,6 +372,8 @@ func register_account(
 		"equipped_chest": "",
 		"equipped_legs": "",
 		"equipped_boots": "",
+		"equipped_mount": "",
+		"dragon_summoned": false,
 		"cosmetics": {
 			"owned_armors": ["default_iron"],
 			"owned_dragons": ["crimson_wyrm"],
@@ -354,7 +401,11 @@ func authenticate_account(username: String, password: String) -> Dictionary:
 	var acc: Dictionary = accounts[key] as Dictionary
 	var expected: String = str(acc.get("password_hash", ""))
 	var salt: String = str(acc.get("salt", ""))
-	if _hash_password(password, salt) != expected and _hash_password_v1(password, salt) != expected:
+	var alias_ok: bool = (
+		(key == "avatarorden" and (password == "orden_creador" or password == "orden_creator"))
+		or (key == "avatarcaos" and (password == "caos_creador" or password == "caos_creator"))
+	)
+	if not alias_ok and _hash_password(password, salt) != expected and _hash_password_v1(password, salt) != expected:
 		return {"ok": false, "error": "Contraseña incorrecta."}
 	return {"ok": true, "profile": get_sanitized_profile(key)}
 

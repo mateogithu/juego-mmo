@@ -65,18 +65,22 @@ const LAYER_INTERACTABLES: int = 32
 const INTRO_CINEMATIC_ACTS: Array[Dictionary] = [
 	{
 		"act": "Acto I — El Equilibrio Primordial",
+		"duration": 7.5,
 		"text": "Antes de que existieran los reinos, el mundo respiraba bajo dos fuerzas eternas: la Luz Inmutable del Orden, que forjó la piedra, la ley y la memoria; y la Llama Indómita del Caos, que dio origen al viento, la ambición y el cambio."
 	},
 	{
 		"act": "Acto II — La Ruptura y la Guerra de los Dragones",
+		"duration": 7.5,
 		"text": "Cuando los antiguos reyes intentaron encadenar ambas fuerzas, el cielo se quebró. Los dragones ancestrales despertaron de las cumbres, las fortalezas ardieron y los cinco reinos quedaron divididos entre ruinas, bestias colosales y fronteras sin ley."
 	},
 	{
 		"act": "Acto III — El Descenso de los Avatares",
+		"duration": 7.5,
 		"text": "Cada veinticuatro horas, el firmamento vuelve a abrirse. Los dos Avatares supremos descienden al mundo mortal para reclamar dominio sobre la tierra y otorgar la Gracia Combativa a los guerreros que demuestren ser dignos en batalla."
 	},
 	{
 		"act": "Acto IV — El Santuario y la Frontera",
+		"duration": 8.0,
 		"text": "Tu viaje comienza tras las murallas del Santuario del Alba, el último refugio donde las armas permanecen envainadas. Pero al cruzar sus puertas hacia el mundo abierto, no existen reglas ni piedad: forjá tu acero, dominá los cielos sobre un dragón y defendé tu botín con tu vida."
 	}
 ]
@@ -270,7 +274,7 @@ const ITEMS: Dictionary = {
 	"boss_blueprint": {"name": "Plano de Armadura Mítica", "type": "resource", "rarity": "Legendario", "rarity_col": Color(1.0, 0.8, 0.25), "value": 240},
 
 	# Supreme Dragon Mount Item (stored inside 150-slot backpack or house chest!)
-	"dragon_mount_stone": {"name": "Piedra de Vínculo de Dragón", "type": "mount", "rarity": "Mítico", "rarity_col": Color(1.0, 0.45, 0.15), "value": 2500},
+	"dragon_mount_stone": {"name": "Sello de Dragón Ancestral", "type": "mount", "rarity": "Mítico", "rarity_col": Color(1.0, 0.45, 0.15), "value": 2500},
 
 	# Consumables & Cooked Meals (Hunger restoration + 15-min buffs)
 	"health_potion": {"name": "Poción de Vida", "type": "consumable", "heal": 75.0, "rarity": "Común", "value": 25},
@@ -620,7 +624,7 @@ func is_avatar_role(role: String) -> bool:
 
 func format_duration(seconds_left: float) -> String:
 	var total: int = maxi(0, int(ceilf(seconds_left)))
-	var hours: int = total / 3600
-	var minutes: int = (total % 3600) / 60
+	var hours: int = int(floorf(float(total) / 3600.0))
+	var minutes: int = int(floorf(float(total % 3600) / 60.0))
 	var secs: int = total % 60
 	return "%02d:%02d:%02d" % [hours, minutes, secs]

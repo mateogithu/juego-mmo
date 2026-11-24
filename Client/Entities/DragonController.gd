@@ -400,80 +400,44 @@ func get_flight_state_label() -> String:
 
 
 func _animate_dragon(delta: float) -> void:
-	# Drive real dragon.glb AnimationPlayer when present
 	var ap: AnimationPlayer = _rig.get("anim_player", null) as AnimationPlayer
-	if ap != null:
-		var target_anim: String = "Dragon_Hit" if is_breathing_fire and ap.has_animation("Dragon_Hit") else "Dragon_Flying"
-		if ap.has_animation(target_anim):
-			var speed_scale: float = 0.45 if flight_state == FlightState.GROUNDED else (0.65 if flight_state == FlightState.GLIDING else 1.25)
-			ap.speed_scale = speed_scale
-			if _last_dragon_anim != target_anim or not ap.is_playing():
-				var anim_res: Animation = ap.get_animation(target_anim)
-				if anim_res != null:
-					anim_res.loop_mode = Animation.LOOP_LINEAR
-				ap.play(target_anim, 0.15)
-				_last_dragon_anim = target_anim
-		if is_local_controlled and (flight_state == FlightState.FLYING or flight_state == FlightState.TAKEOFF):
-			_flap_sound_timer += delta
-			if _flap_sound_timer >= 0.65:
-				_flap_sound_timer = 0.0
-				AudioSynth.play_wing_flap()
+	if ap == null:
 		return
 
-	# Procedural fallback wing/tail animation
-	var wl_root: Node3D = _rig.get("wing_l_root", null) as Node3D
-	var wl_tip: Node3D = _rig.get("wing_l_tip", null) as Node3D
-	var wr_root: Node3D = _rig.get("wing_r_root", null) as Node3D
-	var wr_tip: Node3D = _rig.get("wing_r_tip", null) as Node3D
-	var tail_1: Node3D = _rig.get("tail_1", null) as Node3D
-	var tail_2: Node3D = _rig.get("tail_2", null) as Node3D
-	var neck: Node3D = _rig.get("neck", null) as Node3D
-
-	if wl_root == null or wr_root == null:
+	_wing_phase += delta * 2.2
+	var target_anim: String = "Dragon_Hit" if (is_breathing_fire and ap.has_animation("Dragon_Hit")) else "Dragon_Flying"
+	if not ap.has_animation(target_anim):
 		return
 
-	var flap_freq: float = 0.0
-	var flap_amp: float = 0.0
-	match flight_state:
-		FlightState.GROUNDED:
-			_wing_phase += delta * 1.4
-			wl_root.rotation_degrees = Vector3(12.0, -25.0, 28.0 + sin(_wing_phase) * 3.0)
-			wr_root.rotation_degrees = Vector3(12.0, 25.0, -28.0 - sin(_wing_phase) * 3.0)
-			wl_tip.rotation_degrees = Vector3(0.0, 0.0, -45.0)
-			wr_tip.rotation_degrees = Vector3(0.0, 0.0, 45.0)
-		FlightState.TAKEOFF:
-			flap_freq = 10.5
-			flap_amp = 48.0
-		FlightState.FLYING:
-			flap_freq = 6.2 + clampf(air_speed / 35.0, 0.0, 1.0) * 2.5
-			flap_amp = 38.0
-		FlightState.GLIDING:
-			flap_freq = 1.6
-			flap_amp = 6.0
-		FlightState.LANDING:
-			flap_freq = 8.0
-			flap_amp = 34.0
+	if _last_dragon_anim != target_anim or not ap.is_playing():
+		var anim_res: Animation = ap.get_animation(target_anim)
+		if anim_res != null:
+			anim_res.loop_mode = Animation.LOOP_LINEAR
+		ap.play(target_anim, 0.16)
+		_last_dragon_anim = target_anim
 
-	if flight_state != FlightState.GROUNDED:
-		_wing_phase += delta * flap_freq
-		var beat: float = sin(_wing_phase)
-		var lag_beat: float = sin(_wing_phase - 0.65)
-		wl_root.rotation_degrees = Vector3(0.0, 0.0, beat * flap_amp)
-		wr_root.rotation_degrees = Vector3(0.0, 0.0, -beat * flap_amp)
-		wl_tip.rotation_degrees = Vector3(0.0, 0.0, lag_beat * flap_amp * 0.65)
-		wr_tip.rotation_degrees = Vector3(0.0, 0.0, -lag_beat * flap_amp * 0.65)
-		if is_local_controlled and (flight_state == FlightState.FLYING or flight_state == FlightState.TAKEOFF):
-			_flap_sound_timer += delta
-			if _flap_sound_timer >= maxf(0.45, TAU / maxf(flap_freq, 1.0)):
-				_flap_sound_timer = 0.0
-				AudioSynth.play_wing_flap()
+	if is_breathing_fire:
+		ap.speed_scale = 1.25
+	else:
+		match flight_state:
+			FlightState.GROUNDED:
+				var horiz_spd: float = Vector2(velocity.x, velocity.z).length()
+				ap.speed_scale = 0.85 if horiz_spd > 1.2 else 0.32
+			FlightState.TAKEOFF:
+				ap.speed_scale = 1.65
+			FlightState.FLYING:
+				ap.speed_scale = clampf(1.1 + (air_speed / 55.0), 1.15, 1.65)
+			FlightState.GLIDING:
+				# Hold wings wide in a smooth soaring glide pose with subtle thermal sway
+				ap.speed_scale = 0.0
+				var glide_pos: float = clampf(0.44 + sin(_wing_phase * 0.85) * 0.05, 0.25, 0.65)
+				ap.seek(glide_pos, true)
+			FlightState.LANDING:
+				ap.speed_scale = 1.35
 
-	if tail_1 != null and tail_2 != null:
-		tail_1.rotation_degrees.y = sin(_wing_phase * 0.6) * 14.0
-		tail_2.rotation_degrees.y = sin(_wing_phase * 0.6 - 0.8) * 18.0
-	if neck != null:
-		neck.rotation_degrees.x = sin(_wing_phase * 0.5) * 4.0 + (6.0 if is_breathing_fire else 0.0)
-	var jaw: Node3D = _rig.get("jaw", null) as Node3D
-	if jaw != null:
-		var target_jaw_x: float = 34.0 if is_breathing_fire else 0.0
-		jaw.rotation_degrees.x = lerpf(jaw.rotation_degrees.x, target_jaw_x, clampf(delta * 12.0, 0.0, 1.0))
+	if is_local_controlled and (flight_state == FlightState.FLYING or flight_state == FlightState.TAKEOFF):
+		_flap_sound_timer += delta
+		var interval: float = 0.48 if flight_state == FlightState.TAKEOFF else 0.65
+		if _flap_sound_timer >= interval:
+			_flap_sound_timer = 0.0
+			AudioSynth.play_wing_flap()

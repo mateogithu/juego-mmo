@@ -170,7 +170,7 @@ func _update_zone_pill(in_safe: bool, zname: String) -> void:
 		_zone_pill_lbl.add_theme_color_override("font_color", Color(0.65, 1.0, 0.78))
 	else:
 		_zone_pill.add_theme_stylebox_override("panel", _make_style(Color(0.24, 0.05, 0.05, 0.9), Color(1.0, 0.28, 0.22, 0.95)))
-		_zone_pill_lbl.text = "⚔️ ZONA PVP Y CONQUISTA (BOTÍN TOTAL)"
+		_zone_pill_lbl.text = "⚔️ ZONA PVP ABIERTA (BOTÍN TOTAL)"
 		_zone_pill_lbl.add_theme_color_override("font_color", Color(1.0, 0.65, 0.6))
 
 
@@ -460,7 +460,7 @@ func _update_player_vitals_ui() -> void:
 	_hp_bar.max_value = local_player.max_hp
 	_hp_bar.value = local_player.hp
 	var sh_str: String = " (+%d Escudo)" % int(local_player.shield_hp) if local_player.shield_hp > 1.0 else ""
-	_hp_text.text = "HP: %d / %d%s" % [int(ceilf(local_player.hp)), int(local_player.max_hp), sh_str]
+	_hp_text.text = "Vida: %d / %d%s" % [int(ceilf(local_player.hp)), int(local_player.max_hp), sh_str]
 
 	var is_inf: bool = GameConfig.is_avatar_role(local_player.role) and not local_player.disguised_novice
 	_mana_bar.max_value = local_player.max_mana
@@ -469,7 +469,7 @@ func _update_player_vitals_ui() -> void:
 
 	_stamina_bar.max_value = local_player.max_stamina
 	_stamina_bar.value = local_player.stamina
-	_stamina_text.text = "Estamina: ♾️ ILIMITADA" if is_inf else "Estamina: %d / %d" % [int(local_player.stamina), int(local_player.max_stamina)]
+	_stamina_text.text = "Aguante: ♾️ ILIMITADO" if is_inf else "Aguante: %d / %d" % [int(local_player.stamina), int(local_player.max_stamina)]
 
 	_hunger_bar.max_value = 100.0
 	_hunger_bar.value = local_player.hunger
@@ -478,7 +478,7 @@ func _update_player_vitals_ui() -> void:
 	var gold: int = int(NetworkManager.local_profile.get("gold", 0))
 	var crowns: int = int(NetworkManager.local_profile.get("crowns", 0))
 	var used_slots: int = _count_local_backpack_slots()
-	var slots_txt: String = "∞" if is_inf else "%d/%d" % [used_slots, GameConfig.BACKPACK_MAX_SLOTS]
+	var slots_txt: String = "♾️" if is_inf else "%d/%d" % [used_slots, GameConfig.BACKPACK_MAX_SLOTS]
 	_currency_lbl.text = "Oro: %d | Coronas: %d | Mochila: %s" % [gold, crowns, slots_txt]
 
 	if _coords_lbl != null:
@@ -490,7 +490,7 @@ func _update_player_vitals_ui() -> void:
 	if local_player.is_mounted and local_player.mounted_dragon != null:
 		var dc: DragonController = local_player.mounted_dragon
 		_dragon_status_lbl.visible = true
-		_dragon_status_lbl.text = "🐉 DRAGÓN: %s | Vel: %d m/s | RT/LMB: Fuego | LT/RMB: Planear | A/Esp: Subir | B/Ctrl: Bajar | X/G: Guardar en Mochila" % [
+		_dragon_status_lbl.text = "🐉 DRAGÓN: %s | Vel: %d m/s | RT/LMB: Fuego | LT/RMB: Planear | A/Esp: Subir | B/Ctrl: Bajar | G/X: Guardar en Mochila" % [
 			dc.get_flight_state_label(), int(dc.velocity.length())
 		]
 	else:
@@ -527,9 +527,7 @@ func _count_local_backpack_slots() -> int:
 	var inv: Dictionary = NetworkManager.local_profile.get("inventory", {}) as Dictionary
 	var total: int = 0
 	for q_var: Variant in inv.values():
-		var q: int = int(q_var)
-		if q > 0:
-			total += 1
+		total += maxi(0, int(q_var))
 	return total
 
 
@@ -549,8 +547,8 @@ func _draw_minimap() -> void:
 	for sdef: Dictionary in GameConfig.SAFE_ZONES:
 		var sc: Vector2 = sdef.get("center_xz", Vector2.ZERO) as Vector2
 		var dp: Vector2 = Vector2(sc.x - wp.x, sc.y - wp.z) * scale_px + center
-		if dp.x >= 0.0 and dp.x <= sz.x and dp.y >= 0.0 and dp.y <= sz.y:
-			_minimap_canvas.draw_circle(dp, float(sdef.get("radius", 34.0)) * scale_px, Color(0.25, 0.85, 0.45, 0.3))
+		if dp.x >= -14.0 and dp.x <= sz.x + 14.0 and dp.y >= -14.0 and dp.y <= sz.y + 14.0:
+			_minimap_canvas.draw_circle(dp, float(sdef.get("radius", 34.0)) * scale_px, Color(0.25, 0.85, 0.45, 0.34))
 
 	for wdef: Dictionary in GameConfig.WAYSHRINES:
 		var wxz: Vector2 = wdef.get("xz", Vector2.ZERO) as Vector2
@@ -564,6 +562,10 @@ func _draw_minimap() -> void:
 		if dp.x >= 4.0 and dp.x <= sz.x - 4.0 and dp.y >= 4.0 and dp.y <= sz.y - 4.0:
 			_minimap_canvas.draw_circle(dp, 3.5, Color(1.0, 0.25, 0.22))
 
+	# Player position dot + facing direction line
+	var yaw: float = local_player.visual_root.rotation.y if local_player.visual_root != null else 0.0
+	var fwd_2d: Vector2 = Vector2(-sin(yaw), -cos(yaw)) * 9.0
+	_minimap_canvas.draw_line(center, center + fwd_2d, Color(1.0, 0.94, 0.48), 2.0)
 	_minimap_canvas.draw_circle(center, 4.0, Color(1.0, 1.0, 1.0))
 	_minimap_canvas.draw_circle(center, 2.5, Color(0.2, 0.95, 0.45))
 
@@ -1485,8 +1487,23 @@ func _refresh_inventory_panel() -> void:
 		str(NetworkManager.local_profile.get("equipped_helmet", "")),
 		str(NetworkManager.local_profile.get("equipped_chest", "")),
 		str(NetworkManager.local_profile.get("equipped_legs", "")),
-		str(NetworkManager.local_profile.get("equipped_boots", ""))
+		str(NetworkManager.local_profile.get("equipped_boots", "")),
+		str(NetworkManager.local_profile.get("equipped_mount", ""))
 	]
+
+	# Dedicated Dragon Mount Seal highlight inside the 150-slot inventory
+	var has_dragon_seal: bool = int(inv.get("dragon_mount_stone", 0)) > 0
+	var mount_hdr: Label = Label.new()
+	if has_dragon_seal:
+		var mounted_now: bool = local_player != null and local_player.is_mounted
+		mount_hdr.text = "🐉 Ranura Montura: Sello de Dragón Ancestral (%s)" % ("Invocado" if mounted_now else "Guardado en Mochila")
+		mount_hdr.add_theme_color_override("font_color", Color(1.0, 0.78, 0.32))
+	else:
+		mount_hdr.text = "🐉 Ranura Montura: Vacía (derrotá un Dragón Jefe de Mundo)"
+		mount_hdr.add_theme_color_override("font_color", Color(0.72, 0.74, 0.8))
+	mount_hdr.add_theme_font_size_override("font_size", 12)
+	_inv_list_box.add_child(mount_hdr)
+
 	for item_var: Variant in inv.keys():
 		var iid: String = str(item_var)
 		var qty: int = int(inv[iid])
@@ -1498,10 +1515,17 @@ func _refresh_inventory_panel() -> void:
 		var lbl: Label = Label.new()
 		var eq_tag: String = " [EQ]" if eq_slots.has(iid) else ""
 		lbl.text = "%s x%d%s" % [str(idef["name"]), qty, eq_tag]
+		if iid == "dragon_mount_stone":
+			lbl.add_theme_color_override("font_color", Color(1.0, 0.68, 0.25))
 		lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(lbl)
 		var itype: String = str(idef.get("type", ""))
-		if itype == "weapon" or itype == "armor" or itype == "consumable" or itype == "food":
+		if itype == "mount":
+			var mbtn: Button = Button.new()
+			mbtn.text = "Guardar [G/X]" if (local_player != null and local_player.is_mounted) else "Invocar [G/X]"
+			mbtn.pressed.connect(func() -> void: NetworkManager.request_equip_or_use_item(iid))
+			row.add_child(mbtn)
+		elif itype == "weapon" or itype == "helmet" or itype == "chest" or itype == "legs" or itype == "boots" or itype == "armor" or itype == "consumable" or itype == "food":
 			var btn: Button = Button.new()
 			btn.text = "Comer" if itype == "food" else ("Usar" if itype == "consumable" else "Equipar")
 			btn.pressed.connect(func() -> void: NetworkManager.request_equip_or_use_item(iid))
@@ -1514,14 +1538,22 @@ func _refresh_inventory_panel() -> void:
 		var st_tag: String = str(rec.get("station", "forge"))
 		if not _station_filter.is_empty() and _station_filter != "shop_stall" and st_tag != _station_filter:
 			continue
-		var idef: Dictionary = GameConfig.ITEMS[rkey] as Dictionary
+		var recipe_label: String = ""
+		if rec.has("mint_gold"):
+			recipe_label = "Acuñar %d Monedas de Oro" % int(rec["mint_gold"])
+		elif GameConfig.ITEMS.has(rkey):
+			recipe_label = str((GameConfig.ITEMS[rkey] as Dictionary).get("name", rkey))
+		else:
+			recipe_label = rkey
 		var cost_parts: Array[String] = []
 		var cost: Dictionary = rec["cost"] as Dictionary
 		for ckey_var: Variant in cost.keys():
-			cost_parts.append("%s:%d" % [str((GameConfig.ITEMS[str(ckey_var)] as Dictionary)["name"]), int(cost[ckey_var])])
+			var ck: String = str(ckey_var)
+			var cname: String = str((GameConfig.ITEMS.get(ck, {}) as Dictionary).get("name", ck))
+			cost_parts.append("%s:%d" % [cname, int(cost[ckey_var])])
 		var prefix: String = "[Cocina] " if st_tag == "campfire" else ("[Alq] " if st_tag == "alchemy" else "[Forja] ")
 		var btn: Button = Button.new()
-		btn.text = "%s%s (%s)" % [prefix, str(idef["name"]), ", ".join(cost_parts)]
+		btn.text = "%s%s (%s)" % [prefix, recipe_label, ", ".join(cost_parts)]
 		btn.pressed.connect(func() -> void: NetworkManager.request_craft(rkey))
 		_craft_list_box.add_child(btn)
 
@@ -1554,11 +1586,11 @@ func _refresh_shop_panel() -> void:
 	var crowns: int = int(NetworkManager.local_profile.get("crowns", 0))
 	_shop_crowns_lbl.text = "Tus Coronas: ♾️ (Todo Gratis para Avatar)" if is_admin else "Tus Coronas Cosméticas: %d" % crowns
 	_clear_box(_shop_list_box)
-	var cos: Dictionary = NetworkManager.local_profile.get("cosmetics", {}) as Dictionary
+	var cosmetics_data: Dictionary = NetworkManager.local_profile.get("cosmetics", {}) as Dictionary
 
-	_add_shop_category("ARMADURAS COSMÉTICAS", "armor", GameConfig.COSMETIC_ARMORS, cos.get("owned_armors", []) as Array, str(cos.get("equipped_armor", "")), is_admin)
-	_add_shop_category("SKINS DE DRAGÓN", "dragon", GameConfig.COSMETIC_DRAGONS, cos.get("owned_dragons", []) as Array, str(cos.get("equipped_dragon", "")), is_admin)
-	_add_shop_category("ESTELAS DE VUELO DE DRAGÓN", "trail", GameConfig.COSMETIC_TRAILS, cos.get("owned_trails", []) as Array, str(cos.get("equipped_trail", "")), is_admin)
+	_add_shop_category("ARMADURAS COSMÉTICAS", "armor", GameConfig.COSMETIC_ARMORS, cosmetics_data.get("owned_armors", []) as Array, str(cosmetics_data.get("equipped_armor", "")), is_admin)
+	_add_shop_category("SKINS DE DRAGÓN", "dragon", GameConfig.COSMETIC_DRAGONS, cosmetics_data.get("owned_dragons", []) as Array, str(cosmetics_data.get("equipped_dragon", "")), is_admin)
+	_add_shop_category("ESTELAS DE VUELO DE DRAGÓN", "trail", GameConfig.COSMETIC_TRAILS, cosmetics_data.get("owned_trails", []) as Array, str(cosmetics_data.get("equipped_trail", "")), is_admin)
 
 
 func _add_shop_category(header_text: String, cat: String, catalog: Dictionary, owned: Array, equipped: String, is_admin: bool) -> void:

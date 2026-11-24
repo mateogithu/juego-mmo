@@ -23,6 +23,7 @@ var philosophy: String = GameConfig.PHILOSOPHY_NEUTRAL
 var armor_skin_id: String = "default_iron"
 var dragon_skin_id: String = "crimson_wyrm"
 var trail_id: String = "none"
+var appearance: Dictionary = {}
 
 # Live combat stats (authoritatively synced by WorldAuthority)
 var max_hp: float = 120.0
@@ -43,6 +44,13 @@ var mounted_dragon: DragonController = null
 var _was_in_safe_zone: bool = true
 var _safe_zone_check_accum: float = 0.0
 var _last_anim_played: String = ""
+var _was_on_floor: bool = true
+var _jump_start_timer: float = 0.0
+var _jump_land_timer: float = 0.0
+var _attack_combo_index: int = 0
+var _last_attack_is_spell: bool = false
+var _dodge_anim_name: String = "Dodge_Forward"
+var _block_fx_phase: float = 0.0
 
 # Elder Scrolls Camera State
 const FP_PIVOT_POS: Vector3 = Vector3(0.0, 1.66, -0.06)
@@ -76,6 +84,7 @@ var _net_pos: Vector3 = Vector3.ZERO
 var _net_yaw: float = 0.0
 var _net_anim_speed: float = 0.0
 var _net_attacking: bool = false
+var _net_airborne: bool = false
 
 @onready var visual_root: Node3D = $VisualRoot
 @onready var camera_pivot: Node3D = $CameraPivot
@@ -158,10 +167,12 @@ func apply_full_state(state: Dictionary) -> void:
 		global_position = lp
 		_net_pos = lp
 
-	var needs_rebuild: bool = (new_class != class_id or new_skin != armor_skin_id or new_race != race_id or _rig.is_empty())
+	var new_app: Dictionary = state.get("appearance", appearance) as Dictionary
+	var needs_rebuild: bool = (new_class != class_id or new_skin != armor_skin_id or new_race != race_id or new_app != appearance or _rig.is_empty())
 	class_id = new_class
 	race_id = new_race
 	armor_skin_id = new_skin
+	appearance = new_app.duplicate(true)
 	if is_node_ready():
 		if needs_rebuild:
 			_rebuild_visual()
@@ -174,7 +185,7 @@ func apply_full_state(state: Dictionary) -> void:
 func _rebuild_visual() -> void:
 	if visual_root == null:
 		return
-	_rig = ProceduralMeshFactory.build_humanoid_rig(visual_root, class_id, armor_skin_id, race_id)
+	_rig = ProceduralMeshFactory.build_humanoid_rig(visual_root, class_id, armor_skin_id, race_id, appearance)
 	_last_anim_played = ""
 	_apply_status_visuals()
 	_update_nameplate()
@@ -227,24 +238,28 @@ func _apply_status_visuals() -> void:
 
 	var body_pivot: Node3D = _rig.get("body_pivot", null) as Node3D
 	if body_pivot != null:
+		var race_def: Dictionary = GameConfig.RACES.get(race_id, GameConfig.RACES["HUMAN_VALLEY"]) as Dictionary
+		var race_y: float = float(race_def.get("scale_y", 1.0))
 		var target_scale: float = 1.38 if show_divine else 1.0
-		body_pivot.scale = Vector3.ONE * target_scale
+		body_pivot.scale = Vector3(target_scale, target_scale * race_y, target_scale)
 		body_pivot.visible = (not hide_body_for_fp) and ((not is_stealthed) or is_local)
 
 	if _fp_root != null:
 		_fp_root.visible = is_local and is_first_person and not is_mounted
+	_update_nameplate()
 
 
 func _update_nameplate() -> void:
 	if nameplate == null:
 		return
+	var is_avatar: bool = GameConfig.is_avatar_role(role) and not disguised_novice
 	var lvl_badge: String = LevelingSystem.format_level_badge(level, role, disguised_novice)
 	var prefix: String = ""
-	if not disguised_novice and role == GameConfig.ROLE_AVATAR_ORDEN:
-		prefix = "[♾️ AVATAR DEL ORDEN]\n"
+	if is_avatar and role == GameConfig.ROLE_AVATAR_ORDEN:
+		prefix = "♾️ AVATAR DEL ORDEN\n"
 		nameplate.modulate = Color(1.0, 0.88, 0.35)
-	elif not disguised_novice and role == GameConfig.ROLE_AVATAR_CAOS:
-		prefix = "[♾️ AVATAR DEL CAOS]\n"
+	elif is_avatar and role == GameConfig.ROLE_AVATAR_CAOS:
+		prefix = "♾️ AVATAR DEL CAOS\n"
 		nameplate.modulate = Color(1.0, 0.35, 0.22)
 	elif has_combat_grace:
 		prefix = "★ GRACIA COMBATIVA (x2) ★\n"
@@ -252,8 +267,13 @@ func _update_nameplate() -> void:
 	else:
 		nameplate.modulate = Color(0.92, 0.96, 1.0)
 	var class_name_str: String = str((GameConfig.CLASSES.get(class_id, {}) as Dictionary).get("name", class_id))
-	nameplate.text = "%s%s %s [%s]\n%s | HP %d/%d" % [prefix, lvl_badge, username, philosophy, class_name_str, int(ceilf(hp)), int(max_hp)]
-	nameplate.visible = (not is_local) and (not is_stealthed)
+	if is_local and is_avatar:
+		# Show floating ♾️ crest directly above AvatarOrden / AvatarCaos in 3rd-person
+		nameplate.text = "♾️ %s ♾️" % username
+		nameplate.visible = (not is_first_person) and (not is_stealthed)
+	else:
+		nameplate.text = "%s%s %s [%s]\n%s | HP %d/%d" % [prefix, lvl_badge, username, philosophy, class_name_str, int(ceilf(hp)), int(max_hp)]
+		nameplate.visible = (not is_local) and (not is_stealthed)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -459,6 +479,12 @@ func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
 		is_dodging = true
 		_dodge_timer = 0.42
 		_dodge_dir = move_dir.normalized() if move_dir.length() > 0.1 else cam_fwd
+		if absf(right_axis) > absf(fwd_axis) and absf(right_axis) > 0.25:
+			_dodge_anim_name = "Dodge_Right" if right_axis > 0.0 else "Dodge_Left"
+		elif fwd_axis < -0.25:
+			_dodge_anim_name = "Dodge_Backward"
+		else:
+			_dodge_anim_name = "Dodge_Forward"
 		AudioSynth.play_dodge()
 		var wa: Node = get_tree().get_first_node_in_group("world_authority")
 		if wa != null and wa.has_method("request_dodge"):
@@ -504,12 +530,23 @@ func _process_on_foot_movement(delta: float, ui_captured: bool) -> void:
 			var desired_yaw: float = atan2(-move_dir.x, -move_dir.z)
 			visual_root.rotation.y = lerp_angle(visual_root.rotation.y, desired_yaw, clampf(delta * 12.0, 0.0, 1.0))
 
+	if _jump_start_timer > 0.0:
+		_jump_start_timer = maxf(0.0, _jump_start_timer - delta)
+	if _jump_land_timer > 0.0:
+		_jump_land_timer = maxf(0.0, _jump_land_timer - delta)
+
 	if not is_on_floor():
 		velocity.y -= 24.0 * delta
 	elif not ui_captured and Input.is_action_just_pressed("jump"):
 		velocity.y = 9.2
+		_jump_start_timer = 0.28
 
 	move_and_slide()
+	var on_floor_now: bool = is_on_floor()
+	if on_floor_now and not _was_on_floor:
+		_jump_land_timer = 0.24
+	_was_on_floor = on_floor_now
+
 	var wp: Vector3 = GameConfig.local_to_world(global_position)
 	# Only clamp against surface terrain height when above underground dungeon altitude
 	if wp.y > -80.0:
@@ -548,7 +585,10 @@ func _get_crosshair_aim_dir() -> Vector3:
 
 func _perform_primary_attack() -> void:
 	_attack_cooldown = 0.52
-	_attack_anim_timer = 0.35
+	_attack_anim_timer = 0.48
+	_attack_combo_index = (_attack_combo_index + 1) % 3
+	_last_attack_is_spell = (class_id == "PYROMANCER")
+	_last_anim_played = ""
 	visual_root.rotation.y = _camera_yaw
 	var aim_dir: Vector3 = _get_crosshair_aim_dir()
 	AudioSynth.play_sword_hit()
@@ -580,7 +620,9 @@ func _perform_ability(slot: int) -> void:
 	if not is_unlimited_admin and (mana < float(ab.get("cost_mana", 0.0)) or stamina < float(ab.get("cost_stamina", 0.0))):
 		return
 	ability_cooldowns[slot] = 0.0 if is_unlimited_admin else float(ab.get("cooldown", 4.0))
-	_attack_anim_timer = 0.35
+	_attack_anim_timer = 0.52
+	_last_attack_is_spell = true
+	_last_anim_played = ""
 	visual_root.rotation.y = _camera_yaw
 	var aim_dir: Vector3 = _get_crosshair_aim_dir()
 	var ab_type: String = str(ab.get("type", "projectile"))
@@ -652,7 +694,7 @@ func _try_interact() -> void:
 	if nearest_ws != null:
 		var wa_ws: Node = get_tree().get_first_node_in_group("world_authority")
 		if wa_ws != null and wa_ws.has_method("request_discover_wayshrine"):
-			wa_ws.call("request_discover_wayshrine", nearest_ws.wayshrine_id)
+			wa_ws.call("request_discover_wayshrine", nearest_ws.shrine_id)
 		var hud_ws: Node = get_tree().get_first_node_in_group("game_hud")
 		if hud_ws != null and hud_ws.has_method("open_world_map"):
 			hud_ws.call("open_world_map")
@@ -726,7 +768,9 @@ func _try_interact() -> void:
 			best_dist = d
 			nearest_res = rn
 	if nearest_res != null:
-		_attack_anim_timer = 0.25
+		_attack_anim_timer = 0.42
+		_last_attack_is_spell = false
+		_last_anim_played = ""
 		AudioSynth.play_sword_hit()
 		var wa_res: Node = get_tree().get_first_node_in_group("world_authority")
 		if wa_res != null and wa_res.has_method("request_gather_resource"):
@@ -761,6 +805,9 @@ func _send_transform_to_server() -> void:
 func apply_remote_transform(local_pos: Vector3, yaw: float, anim_speed: float, attacking: bool, blocking: bool, dodging: bool) -> void:
 	if is_local:
 		return
+	var wp: Vector3 = GameConfig.local_to_world(local_pos)
+	var ground_y: float = GameConfig.sample_terrain_height(wp.x, wp.z)
+	_net_airborne = (wp.y > -80.0) and (wp.y - ground_y > 0.75)
 	_net_pos = local_pos
 	_net_yaw = yaw
 	_net_anim_speed = anim_speed
@@ -809,114 +856,147 @@ func _animate_fp_viewmodel(delta: float) -> void:
 	var bob_y: float = sin(_walk_phase * 2.0) * 0.018 if speed > 0.4 else sin(Time.get_ticks_msec() * 0.003) * 0.006
 	var bob_x: float = cos(_walk_phase) * 0.012 if speed > 0.4 else 0.0
 
-	var rh_target_pos: Vector3 = Vector3(0.36 + bob_x, -0.3 + bob_y, -0.58)
+	var rh_target_pos: Vector3 = Vector3(0.36 + bob_x, -0.32 + bob_y, -0.58)
 	var rh_target_rot: Vector3 = Vector3.ZERO
 	if _attack_anim_timer > 0.0:
-		var t: float = sin((_attack_anim_timer / 0.35) * PI)
-		rh_target_pos += Vector3(-0.16 * t, 0.08 * t, -0.22 * t)
-		rh_target_rot = Vector3(-52.0 * t, 28.0 * t, 32.0 * t)
+		var t: float = sin((_attack_anim_timer / 0.48) * PI)
+		rh_target_pos += Vector3(-0.18 * t, 0.09 * t, -0.24 * t)
+		rh_target_rot = Vector3(-56.0 * t, 28.0 * t, 32.0 * t)
+	elif is_blocking:
+		rh_target_pos = Vector3(0.24, -0.2, -0.48)
+		rh_target_rot = Vector3(12.0, -28.0, 26.0)
 
 	var lh_target_pos: Vector3 = Vector3(-0.38 - bob_x, -0.34 + bob_y, -0.55)
 	var lh_target_rot: Vector3 = Vector3.ZERO
 	if is_blocking:
-		lh_target_pos = Vector3(-0.14, -0.14, -0.46)
-		lh_target_rot = Vector3(8.0, 24.0, -12.0)
+		lh_target_pos = Vector3(-0.1, -0.12, -0.44)
+		lh_target_rot = Vector3(10.0, 26.0, -10.0)
 
 	rh.position = rh.position.lerp(rh_target_pos, clampf(delta * 18.0, 0.0, 1.0))
 	rh.rotation_degrees = rh.rotation_degrees.lerp(rh_target_rot, clampf(delta * 18.0, 0.0, 1.0))
 	lh.position = lh.position.lerp(lh_target_pos, clampf(delta * 16.0, 0.0, 1.0))
 	lh.rotation_degrees = lh.rotation_degrees.lerp(lh_target_rot, clampf(delta * 16.0, 0.0, 1.0))
 
+	var fp_barrier: Node3D = _fp_rig.get("block_barrier", null) as Node3D
+	if fp_barrier != null:
+		fp_barrier.visible = is_blocking and not is_mounted
+		if fp_barrier.visible:
+			fp_barrier.rotation.z = _block_fx_phase * 1.4
+			var pulse_fp: float = 0.54 + sin(_block_fx_phase * 5.0) * 0.03
+			fp_barrier.scale = Vector3.ONE * pulse_fp
 
-func _play_rig_anim(ap: AnimationPlayer, anim_name: String, loop: bool = true) -> void:
+
+func _play_rig_anim(ap: AnimationPlayer, anim_name: String, loop: bool = true, speed_scale: float = 1.0) -> bool:
 	if not ap.has_animation(anim_name):
-		return
+		return false
+	ap.speed_scale = speed_scale
 	if _last_anim_played == anim_name and ap.is_playing():
-		return
+		return true
 	var anim: Animation = ap.get_animation(anim_name)
 	if anim != null:
 		anim.loop_mode = Animation.LOOP_LINEAR if loop else Animation.LOOP_NONE
 	ap.play(anim_name, 0.12)
 	_last_anim_played = anim_name
+	return true
+
+
+func _pick_class_attack_anim(ap: AnimationPlayer) -> String:
+	if _last_attack_is_spell or class_id == "PYROMANCER":
+		if ap.has_animation("Spellcast_Shoot"):
+			return "Spellcast_Shoot"
+		if ap.has_animation("Spellcast_Raise"):
+			return "Spellcast_Raise"
+	if class_id == "VALLEY_HUNTER":
+		if ap.has_animation("2H_Ranged_Shoot"):
+			return "2H_Ranged_Shoot"
+		if ap.has_animation("1H_Ranged_Shoot"):
+			return "1H_Ranged_Shoot"
+	if class_id == "SHADOW_ASSASSIN":
+		var rogue_clips: Array[String] = ["Dualwield_Melee_Attack_Slice", "Dualwield_Melee_Attack_Chop", "Dualwield_Melee_Attack_Stab"]
+		var rc: String = rogue_clips[_attack_combo_index % rogue_clips.size()]
+		if ap.has_animation(rc):
+			return rc
+	var melee_clips: Array[String] = ["1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Slice_Horizontal", "1H_Melee_Attack_Chop"]
+	var mc: String = melee_clips[_attack_combo_index % melee_clips.size()]
+	if ap.has_animation(mc):
+		return mc
+	return "Idle"
+
+
+func _apply_fallback_guard_pose(skel: Skeleton3D, active: bool) -> void:
+	if skel == null:
+		return
+	var arm_l_idx: int = skel.find_bone("upperarm.l")
+	var arm_r_idx: int = skel.find_bone("upperarm.r")
+	if active:
+		if arm_l_idx >= 0:
+			skel.set_bone_pose_rotation(arm_l_idx, Quaternion.from_euler(Vector3(-0.85, 0.55, 0.25)))
+		if arm_r_idx >= 0:
+			skel.set_bone_pose_rotation(arm_r_idx, Quaternion.from_euler(Vector3(-0.65, -0.45, -0.2)))
+	else:
+		if arm_l_idx >= 0:
+			skel.clear_bones_global_pose_override()
 
 
 func _animate_humanoid(delta: float) -> void:
 	var horiz_speed: float = Vector2(velocity.x, velocity.z).length() if is_local else _net_anim_speed
 	var attacking: bool = (_attack_anim_timer > 0.0) if is_local else _net_attacking
+	var airborne: bool = (not is_on_floor()) if is_local else _net_airborne
 	if horiz_speed > 0.35:
 		_walk_phase += delta * clampf(horiz_speed * 1.45, 5.0, 14.0)
+	_block_fx_phase += delta
 
-	# Drive real KayKit .glb AnimationPlayer when present
+	# Active Runic Guard Barrier VFX in 3rd-person (visible to both local & remote players)
+	var block_barrier: Node3D = _rig.get("block_barrier", null) as Node3D
+	if block_barrier != null:
+		var show_tp_barrier: bool = is_blocking and not is_mounted and not (is_local and is_first_person)
+		block_barrier.visible = show_tp_barrier
+		if show_tp_barrier:
+			block_barrier.rotation.z = _block_fx_phase * 1.6
+			var pulse: float = 1.0 + sin(_block_fx_phase * 5.2) * 0.06
+			block_barrier.scale = Vector3(pulse, pulse, 1.0)
+
+	# Drive real .glb AnimationPlayer for every character state
 	var ap: AnimationPlayer = _rig.get("anim_player", null) as AnimationPlayer
-	if ap != null:
-		if is_mounted:
-			_play_rig_anim(ap, "Sit_Chair_Idle" if ap.has_animation("Sit_Chair_Idle") else "Idle", true)
-		elif is_dodging:
-			_play_rig_anim(ap, "Dodge_Forward" if ap.has_animation("Dodge_Forward") else "Running_A", false)
-		elif attacking:
-			var atk_anim: String = "Spellcast_Shoot" if (class_id == "PYROMANCER" or class_id == "CLERIC_ORDER") else "1H_Melee_Attack_Slice_Horizontal"
-			_play_rig_anim(ap, atk_anim if ap.has_animation(atk_anim) else "Idle", false)
-		elif is_blocking and ap.has_animation("Block"):
-			_play_rig_anim(ap, "Block", true)
-		elif horiz_speed > 6.8 and ap.has_animation("Running_A"):
-			_play_rig_anim(ap, "Running_A", true)
-		elif horiz_speed > 0.35 and ap.has_animation("Walking_A"):
-			_play_rig_anim(ap, "Walking_A", true)
-		else:
-			_play_rig_anim(ap, "Idle", true)
+	var skel: Skeleton3D = _rig.get("skeleton", null) as Skeleton3D
+	if ap == null:
 		return
 
-	# Procedural fallback limb animation
-	var leg_l: Node3D = _rig.get("leg_l", null) as Node3D
-	var leg_r: Node3D = _rig.get("leg_r", null) as Node3D
-	var arm_l: Node3D = _rig.get("arm_l", null) as Node3D
-	var arm_r: Node3D = _rig.get("arm_r", null) as Node3D
-	var torso: Node3D = _rig.get("torso", null) as Node3D
-	var cape: Node3D = _rig.get("cape", null) as Node3D
-	var body_pivot: Node3D = _rig.get("body_pivot", null) as Node3D
-
-	if leg_l == null or arm_r == null or body_pivot == null:
-		return
-
+	var used_fallback_guard: bool = false
 	if is_mounted:
-		leg_l.rotation_degrees = Vector3(-55.0, 0.0, -24.0)
-		leg_r.rotation_degrees = Vector3(-55.0, 0.0, 24.0)
-		arm_l.rotation_degrees = Vector3(-35.0, 0.0, 0.0)
-		arm_r.rotation_degrees = Vector3(-35.0, 0.0, 0.0)
-		body_pivot.rotation_degrees.x = 0.0
-		if cape != null:
-			cape.rotation_degrees.x = 32.0 + sin(Time.get_ticks_msec() * 0.01) * 8.0
-		return
-
-	if is_dodging:
-		body_pivot.rotation_degrees.x = lerpf(body_pivot.rotation_degrees.x, -42.0, delta * 18.0)
+		if not _play_rig_anim(ap, "Sit_Chair_Idle", true, 1.0):
+			_play_rig_anim(ap, "Idle", true, 1.0)
+	elif is_dodging:
+		if not _play_rig_anim(ap, _dodge_anim_name, false, 1.25):
+			_play_rig_anim(ap, "Dodge_Forward" if ap.has_animation("Dodge_Forward") else "Running_A", false, 1.4)
+	elif attacking:
+		var atk_anim: String = _pick_class_attack_anim(ap)
+		_play_rig_anim(ap, atk_anim, false, 1.85)
+	elif is_blocking:
+		# Prioritize dedicated Block/Blocking/Defend clips; fall back to Skeleton3D guard pose if absent
+		if ap.has_animation("Blocking"):
+			_play_rig_anim(ap, "Blocking", true, 1.0)
+		elif ap.has_animation("Block"):
+			_play_rig_anim(ap, "Block", true, 1.0)
+		elif ap.has_animation("Defend"):
+			_play_rig_anim(ap, "Defend", true, 1.0)
+		else:
+			_play_rig_anim(ap, "Idle", true, 1.0)
+			used_fallback_guard = true
+	elif _jump_start_timer > 0.0 and ap.has_animation("Jump_Start"):
+		_play_rig_anim(ap, "Jump_Start", false, 1.35)
+	elif airborne and ap.has_animation("Jump_Idle"):
+		_play_rig_anim(ap, "Jump_Idle", true, 1.0)
+	elif _jump_land_timer > 0.0 and horiz_speed < 2.0 and ap.has_animation("Jump_Land"):
+		_play_rig_anim(ap, "Jump_Land", false, 1.5)
+	elif horiz_speed > 8.2 and ap.has_animation("Running_B"):
+		_play_rig_anim(ap, "Running_B", true, 1.15)
+	elif horiz_speed > 5.8 and ap.has_animation("Running_A"):
+		_play_rig_anim(ap, "Running_A", true, clampf(horiz_speed / 6.5, 0.9, 1.35))
+	elif horiz_speed > 0.35 and ap.has_animation("Walking_A"):
+		_play_rig_anim(ap, "Walking_A", true, clampf(horiz_speed / 3.8, 0.85, 1.4))
 	else:
-		body_pivot.rotation_degrees.x = lerpf(body_pivot.rotation_degrees.x, 0.0, delta * 12.0)
+		_play_rig_anim(ap, "Idle", true, 1.0)
 
-	if horiz_speed > 0.35:
-		var swing: float = sin(_walk_phase) * 34.0
-		leg_l.rotation_degrees = Vector3(swing, 0.0, 0.0)
-		leg_r.rotation_degrees = Vector3(-swing, 0.0, 0.0)
-		if not attacking and not is_blocking:
-			arm_l.rotation_degrees = Vector3(-swing * 0.7, 0.0, 0.0)
-			arm_r.rotation_degrees = Vector3(swing * 0.7, 0.0, 0.0)
-		if cape != null:
-			cape.rotation_degrees.x = clampf(horiz_speed * 3.8, 8.0, 42.0) + sin(_walk_phase * 2.0) * 5.0
-	else:
-		leg_l.rotation_degrees = leg_l.rotation_degrees.lerp(Vector3.ZERO, delta * 10.0)
-		leg_r.rotation_degrees = leg_r.rotation_degrees.lerp(Vector3.ZERO, delta * 10.0)
-		if not attacking and not is_blocking:
-			arm_l.rotation_degrees = arm_l.rotation_degrees.lerp(Vector3.ZERO, delta * 10.0)
-			arm_r.rotation_degrees = arm_r.rotation_degrees.lerp(Vector3.ZERO, delta * 10.0)
-		if cape != null:
-			cape.rotation_degrees.x = lerpf(cape.rotation_degrees.x, 4.0, delta * 6.0)
-
-	if is_blocking:
-		arm_l.rotation_degrees = Vector3(-72.0, 35.0, 0.0)
-	if attacking:
-		var slash_t: float = sin((_attack_anim_timer / 0.35) * PI) if is_local else 1.0
-		arm_r.rotation_degrees = Vector3(-115.0 * slash_t, -25.0 * slash_t, 0.0)
-		if torso != null:
-			torso.rotation_degrees.y = 18.0 * slash_t
-	elif torso != null:
-		torso.rotation_degrees.y = lerpf(torso.rotation_degrees.y, 0.0, delta * 10.0)
+	if used_fallback_guard:
+		_apply_fallback_guard_pose(skel, true)

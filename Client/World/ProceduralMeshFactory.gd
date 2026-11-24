@@ -1,39 +1,112 @@
 class_name ProceduralMeshFactory
 extends RefCounted
 
-## Sculpted organic 3D mesh & PBR material factory (Release 1.1 Visual Overhaul).
-## - ZERO BoxMesh on Dragons or Character bodies/limbs: uses lofted SurfaceTool ArrayMeshes,
-##   CapsuleMesh, tapered CylinderMesh, SphereMesh, TorusMesh, and PrismMesh.
-## - Automatic .glb loader for res://Assets/Models/player_*.glb and dragon.glb.
-## - Character visual root oriented with ModelOrient rotation.y = PI (+Z glTF standard -> -Z forward).
+## Real .glb Model & 1K PBR Material Factory (Release 2.0).
+## - Instantiates real rigged .glb scenes (player_knight, player_mage, player_cleric,
+##   player_rogue, player_ranger, dragon) for all characters, bosses, and mounts.
+## - Applies real 1K PBR texture sets (Albedo, Normal, Roughness) to terrain props,
+##   sanctuary walls, player structures, stations, trees, and rocks.
+## - Zero subsurface_scattering anywhere (100% Compatibility/Mobile safe on Radeon Vega 8).
+## - Zero procedural capsule/block fallbacks for characters, enemies, trees, or dragons.
 
 const SHADER_GRACE_AURA: Shader = preload("res://Client/Shaders/combat_grace_aura.gdshader")
 const SHADER_DRAGON_FIRE: Shader = preload("res://Client/Shaders/dragon_fire.gdshader")
+
+# Preloaded real rigged .glb assets (forces Godot import & zero runtime fallback to primitives)
+const GLB_PATH_KNIGHT: String = "res://Assets/Models/player_knight.glb"
+const GLB_PATH_MAGE: String = "res://Assets/Models/player_mage.glb"
+const GLB_PATH_CLERIC: String = "res://Assets/Models/player_cleric.glb"
+const GLB_PATH_ROGUE: String = "res://Assets/Models/player_rogue.glb"
+const GLB_PATH_RANGER: String = "res://Assets/Models/player_ranger.glb"
+const GLB_PATH_DRAGON: String = "res://Assets/Models/dragon.glb"
+
+const GLB_KNIGHT: PackedScene = preload("res://Assets/Models/player_knight.glb")
+const GLB_MAGE: PackedScene = preload("res://Assets/Models/player_mage.glb")
+const GLB_CLERIC: PackedScene = preload("res://Assets/Models/player_cleric.glb")
+const GLB_ROGUE: PackedScene = preload("res://Assets/Models/player_rogue.glb")
+const GLB_RANGER: PackedScene = preload("res://Assets/Models/player_ranger.glb")
+const GLB_DRAGON: PackedScene = preload("res://Assets/Models/dragon.glb")
+
+# Preloaded 1K PBR Texture Sets (Albedo + Normal + Roughness)
 const TEX_STONE_ALBEDO: Texture2D = preload("res://Assets/Textures/stone_albedo.jpg")
 const TEX_STONE_NORMAL: Texture2D = preload("res://Assets/Textures/stone_normal.jpg")
 const TEX_STONE_ROUGH: Texture2D = preload("res://Assets/Textures/stone_roughness.jpg")
 
+const TEX_ROCK_ALBEDO: Texture2D = preload("res://Assets/Textures/rock_albedo.jpg")
+const TEX_ROCK_NORMAL: Texture2D = preload("res://Assets/Textures/rock_normal.jpg")
+const TEX_ROCK_ROUGH: Texture2D = preload("res://Assets/Textures/rock_roughness.jpg")
 
-static func make_stone_pbr_material(tint: Color = Color(0.95, 0.95, 0.95)) -> StandardMaterial3D:
+const TEX_DIRT_ALBEDO: Texture2D = preload("res://Assets/Textures/dirt_albedo.jpg")
+const TEX_DIRT_NORMAL: Texture2D = preload("res://Assets/Textures/dirt_normal.jpg")
+
+const TEX_GRASS_ALBEDO: Texture2D = preload("res://Assets/Textures/grass_albedo.jpg")
+const TEX_GRASS_NORMAL: Texture2D = preload("res://Assets/Textures/grass_normal.jpg")
+const TEX_GRASS_ROUGH: Texture2D = preload("res://Assets/Textures/grass_roughness.jpg")
+
+
+# --- 1K PBR Material Builders (Zero Subsurface Scattering — Mobile/Compatibility Clean) ---
+
+static func make_stone_pbr_material(tint: Color = Color(0.95, 0.95, 0.95), uv_scale: float = 0.35) -> StandardMaterial3D:
 	var mat: StandardMaterial3D = StandardMaterial3D.new()
 	mat.albedo_color = tint
 	mat.albedo_texture = TEX_STONE_ALBEDO
 	mat.normal_enabled = true
 	mat.normal_texture = TEX_STONE_NORMAL
+	mat.normal_scale = 1.0
 	mat.roughness_texture = TEX_STONE_ROUGH
+	mat.roughness = 0.85
+	mat.metallic = 0.04
 	mat.uv1_triplanar = true
-	mat.uv1_scale = Vector3(0.35, 0.35, 0.35)
+	mat.uv1_scale = Vector3(uv_scale, uv_scale, uv_scale)
+	mat.subsurf_scatter_enabled = false
 	return mat
 
 
-static func _find_child_of_type(node: Node, type_name: String) -> Node:
-	if node.is_class(type_name):
-		return node
-	for c: Node in node.get_children():
-		var found: Node = _find_child_of_type(c, type_name)
-		if found != null:
-			return found
-	return null
+static func make_rock_pbr_material(tint: Color = Color(0.86, 0.86, 0.9), uv_scale: float = 0.4) -> StandardMaterial3D:
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = tint
+	mat.albedo_texture = TEX_ROCK_ALBEDO
+	mat.normal_enabled = true
+	mat.normal_texture = TEX_ROCK_NORMAL
+	mat.normal_scale = 1.15
+	mat.roughness_texture = TEX_ROCK_ROUGH
+	mat.roughness = 0.9
+	mat.metallic = 0.06
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3(uv_scale, uv_scale, uv_scale)
+	mat.subsurf_scatter_enabled = false
+	return mat
+
+
+static func make_wood_pbr_material(tint: Color = Color(0.56, 0.38, 0.24), uv_scale: float = 0.45) -> StandardMaterial3D:
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = tint
+	mat.albedo_texture = TEX_DIRT_ALBEDO
+	mat.normal_enabled = true
+	mat.normal_texture = TEX_DIRT_NORMAL
+	mat.normal_scale = 0.95
+	mat.roughness = 0.86
+	mat.metallic = 0.0
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3(uv_scale, uv_scale, uv_scale)
+	mat.subsurf_scatter_enabled = false
+	return mat
+
+
+static func make_foliage_pbr_material(tint: Color = Color(0.46, 0.68, 0.4), uv_scale: float = 0.45) -> StandardMaterial3D:
+	var mat: StandardMaterial3D = StandardMaterial3D.new()
+	mat.albedo_color = tint
+	mat.albedo_texture = TEX_GRASS_ALBEDO
+	mat.normal_enabled = true
+	mat.normal_texture = TEX_GRASS_NORMAL
+	mat.normal_scale = 0.85
+	mat.roughness_texture = TEX_GRASS_ROUGH
+	mat.roughness = 0.84
+	mat.metallic = 0.0
+	mat.uv1_triplanar = true
+	mat.uv1_scale = Vector3(uv_scale, uv_scale, uv_scale)
+	mat.subsurf_scatter_enabled = false
+	return mat
 
 
 static func make_pbr_material(
@@ -47,23 +120,11 @@ static func make_pbr_material(
 	mat.albedo_color = color
 	mat.roughness = roughness
 	mat.metallic = metallic
+	mat.subsurf_scatter_enabled = false
 	if emission_energy > 0.0:
 		mat.emission_enabled = true
 		mat.emission = emission
 		mat.emission_energy_multiplier = emission_energy
-	return mat
-
-
-static func make_wing_membrane_material(wing_color: Color, backlight_color: Color) -> StandardMaterial3D:
-	var mat: StandardMaterial3D = StandardMaterial3D.new()
-	mat.albedo_color = wing_color
-	mat.roughness = 0.52
-	mat.metallic = 0.04
-	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mat.backlight_enabled = true
-	mat.backlight = backlight_color
-	mat.subsurf_scatter_enabled = true
-	mat.subsurf_scatter_strength = 0.55
 	return mat
 
 
@@ -79,23 +140,161 @@ static func make_grace_aura_material(is_chaos: bool = false) -> ShaderMaterial:
 	return mat
 
 
-# --- Smooth Primitive & Lofted SurfaceTool Helpers ---
+# --- GLB Loader & Sanitizer (Guaranteed Load via Preload + GLTFDocument Fallback) ---
 
-static func _add_capsule(parent: Node3D, radius: float, height: float, pos: Vector3, mat: Material, node_name: String = "Cap", rot_deg: Vector3 = Vector3.ZERO) -> MeshInstance3D:
-	var mi: MeshInstance3D = MeshInstance3D.new()
-	mi.name = node_name
-	var mesh: CapsuleMesh = CapsuleMesh.new()
-	mesh.radius = radius
-	mesh.height = maxf(height, radius * 2.0 + 0.02)
-	mesh.radial_segments = 14
-	mesh.rings = 6
-	mi.mesh = mesh
-	mi.material_override = mat
-	mi.position = pos
-	mi.rotation_degrees = rot_deg
-	parent.add_child(mi)
-	return mi
+static func _find_child_of_type(node: Node, type_name: String) -> Node:
+	if node == null:
+		return null
+	if node.is_class(type_name):
+		return node
+	for c: Node in node.get_children():
+		var found: Node = _find_child_of_type(c, type_name)
+		if found != null:
+			return found
+	return null
 
+
+static func _find_child_by_name(node: Node, target_name: String) -> Node:
+	if node == null:
+		return null
+	if node.name == target_name:
+		return node
+	for c: Node in node.get_children():
+		var found: Node = _find_child_by_name(c, target_name)
+		if found != null:
+			return found
+	return null
+
+
+static func _collect_mesh_instances(node: Node, out: Array[MeshInstance3D]) -> void:
+	if node == null:
+		return
+	if node is MeshInstance3D:
+		out.append(node as MeshInstance3D)
+	for c: Node in node.get_children():
+		_collect_mesh_instances(c, out)
+
+
+static func _instantiate_glb(packed: PackedScene, res_path: String) -> Node3D:
+	if packed != null:
+		var inst: Node = packed.instantiate()
+		if inst is Node3D:
+			_sanitize_glb_materials(inst)
+			return inst as Node3D
+		if inst != null:
+			inst.queue_free()
+
+	if ResourceLoader.exists(res_path):
+		var loaded: PackedScene = ResourceLoader.load(res_path) as PackedScene
+		if loaded != null:
+			var inst2: Node = loaded.instantiate()
+			if inst2 is Node3D:
+				_sanitize_glb_materials(inst2)
+				return inst2 as Node3D
+			if inst2 != null:
+				inst2.queue_free()
+
+	# Runtime GLTFDocument fallback guarantees .glb loads even on unimported fresh clones
+	var abs_path: String = ProjectSettings.globalize_path(res_path)
+	if FileAccess.file_exists(res_path) or FileAccess.file_exists(abs_path):
+		var gltf_doc: GLTFDocument = GLTFDocument.new()
+		var gltf_state: GLTFState = GLTFState.new()
+		var err: Error = gltf_doc.append_from_file(abs_path, gltf_state)
+		if err == OK:
+			var generated: Node = gltf_doc.generate_scene(gltf_state)
+			if generated is Node3D:
+				_sanitize_glb_materials(generated)
+				return generated as Node3D
+			if generated != null:
+				generated.queue_free()
+
+	push_error("[ProceduralMeshFactory] Failed to load required .glb asset: %s" % res_path)
+	return Node3D.new()
+
+
+static func _sanitize_glb_materials(root: Node) -> void:
+	var meshes: Array[MeshInstance3D] = []
+	_collect_mesh_instances(root, meshes)
+	for mi: MeshInstance3D in meshes:
+		if mi.mesh == null:
+			continue
+		var surf_count: int = mi.mesh.get_surface_count()
+		for s: int in range(surf_count):
+			var mat: Material = mi.get_active_material(s)
+			if mat is BaseMaterial3D:
+				var bm: BaseMaterial3D = mat.duplicate() as BaseMaterial3D
+				bm.subsurf_scatter_enabled = false
+				mi.set_surface_override_material(s, bm)
+
+
+static func _tint_glb_materials(root: Node, tint_col: Color, blend_weight: float = 0.25, metallic_boost: float = 0.0, emission_col: Color = Color(0, 0, 0), emission_energy: float = 0.0) -> void:
+	var meshes: Array[MeshInstance3D] = []
+	_collect_mesh_instances(root, meshes)
+	for mi: MeshInstance3D in meshes:
+		if mi.mesh == null:
+			continue
+		for s: int in range(mi.mesh.get_surface_count()):
+			var base_mat: Material = mi.get_surface_override_material(s)
+			if base_mat == null:
+				base_mat = mi.mesh.surface_get_material(s)
+			if base_mat is BaseMaterial3D:
+				var bm: BaseMaterial3D = base_mat.duplicate() as BaseMaterial3D
+				bm.subsurf_scatter_enabled = false
+				if blend_weight > 0.001:
+					bm.albedo_color = bm.albedo_color.lerp(tint_col, blend_weight)
+				if metallic_boost > 0.001:
+					bm.metallic = clampf(bm.metallic + metallic_boost, 0.0, 0.92)
+				if emission_energy > 0.001:
+					bm.emission_enabled = true
+					bm.emission = emission_col
+					bm.emission_energy_multiplier = emission_energy
+				mi.set_surface_override_material(s, bm)
+
+
+static func _set_nodes_visible(root: Node, names: Array[String], is_vis: bool) -> void:
+	for nm: String in names:
+		var found: Node = _find_child_by_name(root, nm)
+		if found is Node3D:
+			(found as Node3D).visible = is_vis
+
+
+static func _configure_class_glb_attachments(glb_root: Node3D, class_id: String, hide_helmet: bool) -> void:
+	# Hide duplicate multi-weapon meshes baked into KayKit Adventurer handslots
+	if class_id == "ARCANE_KNIGHT":
+		_set_nodes_visible(glb_root, ["1H_Sword_Offhand", "Rectangle_Shield", "Round_Shield", "Spike_Shield", "2H_Sword"], false)
+		_set_nodes_visible(glb_root, ["1H_Sword", "Badge_Shield"], true)
+		_set_nodes_visible(glb_root, ["Knight_Helmet"], not hide_helmet)
+	elif class_id == "PYROMANCER":
+		_set_nodes_visible(glb_root, ["1H_Wand", "Spellbook"], false)
+		_set_nodes_visible(glb_root, ["2H_Staff", "Spellbook_open"], true)
+		_set_nodes_visible(glb_root, ["Mage_Hat"], not hide_helmet)
+	elif class_id == "WAR_CLERIC":
+		_set_nodes_visible(glb_root, ["1H_Axe_Offhand", "2H_Axe", "Mug"], false)
+		_set_nodes_visible(glb_root, ["1H_Axe", "Barbarian_Round_Shield"], true)
+		_set_nodes_visible(glb_root, ["Barbarian_Hat"], not hide_helmet)
+	elif class_id == "SHADOW_ASSASSIN":
+		_set_nodes_visible(glb_root, ["1H_Crossbow", "2H_Crossbow", "Throwable"], false)
+		_set_nodes_visible(glb_root, ["Knife", "Knife_Offhand"], true)
+	elif class_id == "VALLEY_HUNTER":
+		_set_nodes_visible(glb_root, ["Knife", "Knife_Offhand", "1H_Crossbow", "Throwable"], false)
+		_set_nodes_visible(glb_root, ["2H_Crossbow"], true)
+
+
+static func _get_class_glb_pair(class_id: String) -> Array:
+	match class_id:
+		"PYROMANCER":
+			return [GLB_MAGE, GLB_PATH_MAGE]
+		"WAR_CLERIC":
+			return [GLB_CLERIC, GLB_PATH_CLERIC]
+		"SHADOW_ASSASSIN":
+			return [GLB_ROGUE, GLB_PATH_ROGUE]
+		"VALLEY_HUNTER":
+			return [GLB_RANGER, GLB_PATH_RANGER]
+		_:
+			return [GLB_KNIGHT, GLB_PATH_KNIGHT]
+
+
+# --- Primitive Helpers (Used strictly for Runic VFX, Structures, Stations & Portals) ---
 
 static func _add_cylinder(parent: Node3D, top_r: float, bottom_r: float, height: float, pos: Vector3, mat: Material, node_name: String = "Cyl", radial_segments: int = 14, rot_deg: Vector3 = Vector3.ZERO) -> MeshInstance3D:
 	var mi: MeshInstance3D = MeshInstance3D.new()
@@ -121,7 +320,7 @@ static func _add_sphere(parent: Node3D, radius: float, pos: Vector3, mat: Materi
 	mesh.radius = radius
 	mesh.height = radius * 2.0
 	mesh.radial_segments = segments
-	mesh.rings = maxi(8, segments / 2)
+	mesh.rings = maxi(8, int(floorf(float(segments) / 2.0)))
 	mi.mesh = mesh
 	mi.material_override = mat
 	mi.position = pos
@@ -172,206 +371,7 @@ static func _add_box(parent: Node3D, size: Vector3, pos: Vector3, mat: Material,
 	return mi
 
 
-## Lofts an organic smooth-shaded tube mesh from elliptical cross-section rings:
-## Each ring dict: {"pos": Vector3, "rx": float, "ry": float}
-static func make_lofted_tube_mesh(rings: Array, radial_segs: int = 14) -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-
-	var ring_verts: Array = []
-	var ring_count: int = rings.size()
-	for r_idx: int in range(ring_count):
-		var r: Dictionary = rings[r_idx] as Dictionary
-		var p: Vector3 = r["pos"] as Vector3
-		var rx: float = float(r["rx"])
-		var ry: float = float(r["ry"])
-
-		var tangent: Vector3
-		if r_idx == 0 and ring_count > 1:
-			tangent = ((rings[1] as Dictionary)["pos"] as Vector3 - p).normalized()
-		elif r_idx == ring_count - 1 and ring_count > 1:
-			tangent = (p - (rings[r_idx - 1] as Dictionary)["pos"] as Vector3).normalized()
-		else:
-			tangent = ((rings[r_idx + 1] as Dictionary)["pos"] as Vector3 - (rings[r_idx - 1] as Dictionary)["pos"] as Vector3).normalized()
-		if tangent.length_squared() < 0.001:
-			tangent = Vector3.FORWARD
-
-		var up_ref: Vector3 = Vector3.UP if absf(tangent.dot(Vector3.UP)) < 0.94 else Vector3.RIGHT
-		var side: Vector3 = tangent.cross(up_ref).normalized()
-		var up: Vector3 = side.cross(tangent).normalized()
-
-		var pts: Array[Vector3] = []
-		for s: int in range(radial_segs + 1):
-			var ang: float = (float(s) / float(radial_segs)) * TAU
-			var pt: Vector3 = p + side * (cos(ang) * rx) + up * (sin(ang) * ry)
-			pts.append(pt)
-		ring_verts.append(pts)
-
-	for r_idx: int in range(ring_count - 1):
-		var cur: Array = ring_verts[r_idx] as Array
-		var nxt: Array = ring_verts[r_idx + 1] as Array
-		var v0: float = float(r_idx) / float(maxi(1, ring_count - 1))
-		var v1: float = float(r_idx + 1) / float(maxi(1, ring_count - 1))
-		for s: int in range(radial_segs):
-			var u0: float = float(s) / float(radial_segs)
-			var u1: float = float(s + 1) / float(radial_segs)
-			var a: Vector3 = cur[s] as Vector3
-			var b: Vector3 = cur[s + 1] as Vector3
-			var c: Vector3 = nxt[s + 1] as Vector3
-			var d: Vector3 = nxt[s] as Vector3
-			st.set_uv(Vector2(u0, v0))
-			st.add_vertex(a)
-			st.set_uv(Vector2(u1, v0))
-			st.add_vertex(b)
-			st.set_uv(Vector2(u1, v1))
-			st.add_vertex(c)
-
-			st.set_uv(Vector2(u0, v0))
-			st.add_vertex(a)
-			st.set_uv(Vector2(u1, v1))
-			st.add_vertex(c)
-			st.set_uv(Vector2(u0, v1))
-			st.add_vertex(d)
-
-	st.index()
-	st.generate_normals()
-	return st.commit()
-
-
-static func _add_lofted(parent: Node3D, rings: Array, mat: Material, node_name: String, segs: int = 14) -> MeshInstance3D:
-	var mi: MeshInstance3D = MeshInstance3D.new()
-	mi.name = node_name
-	mi.mesh = make_lofted_tube_mesh(rings, segs)
-	mi.material_override = mat
-	parent.add_child(mi)
-	return mi
-
-
-## Curved multi-ribbed organic dragon wing membrane mesh (zero boxes)
-static func _make_wing_membrane_mesh(p_root: Vector3, p_elbow: Vector3, p_tips: Array[Vector3], p_body_attach: Vector3) -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-
-	# Build scalloped triangular fan segments between elbow/root and trailing wing finger tips
-	var chain: Array[Vector3] = []
-	for pt: Vector3 in p_tips:
-		chain.append(pt)
-	chain.append(p_body_attach)
-
-	for i: int in range(chain.size() - 1):
-		var a: Vector3 = chain[i]
-		var b: Vector3 = chain[i + 1]
-		var mid: Vector3 = (a + b) * 0.5 + (p_elbow - (a + b) * 0.5) * 0.16 + Vector3(0.0, 0.14, 0.0)
-		var hub: Vector3 = p_elbow if i < p_tips.size() - 1 else p_root
-		st.set_uv(Vector2(0.0, 0.0))
-		st.add_vertex(hub)
-		st.set_uv(Vector2(1.0, 0.0))
-		st.add_vertex(a)
-		st.set_uv(Vector2(0.5, 1.0))
-		st.add_vertex(mid)
-
-		st.set_uv(Vector2(0.0, 0.0))
-		st.add_vertex(hub)
-		st.set_uv(Vector2(0.5, 1.0))
-		st.add_vertex(mid)
-		st.set_uv(Vector2(1.0, 1.0))
-		st.add_vertex(b)
-
-	# Connect leading edge between root and elbow
-	if not p_tips.is_empty():
-		st.set_uv(Vector2(0.0, 0.0))
-		st.add_vertex(p_root)
-		st.set_uv(Vector2(0.5, 0.0))
-		st.add_vertex(p_elbow)
-		st.set_uv(Vector2(0.5, 1.0))
-		st.add_vertex(p_body_attach)
-
-	st.index()
-	st.generate_normals()
-	return st.commit()
-
-
-static func _make_curved_cape_mesh() -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-	var rows: int = 6
-	var cols: int = 5
-	var grid: Array[Vector3] = []
-	for r: int in range(rows + 1):
-		var vt: float = float(r) / float(rows)
-		var y: float = -vt * 1.02
-		var half_w: float = lerpf(0.24, 0.42, vt)
-		var z_curve: float = -0.04 - vt * 0.16 - sin(vt * PI) * 0.05
-		for c: int in range(cols + 1):
-			var ut: float = float(c) / float(cols)
-			var x: float = lerpf(-half_w, half_w, ut)
-			var fold: float = sin(ut * PI * 3.0) * 0.025 * vt
-			grid.append(Vector3(x, y, z_curve + fold))
-	var stride: int = cols + 1
-	for r: int in range(rows):
-		for c: int in range(cols):
-			var i00: int = r * stride + c
-			var i10: int = i00 + 1
-			var i01: int = i00 + stride
-			var i11: int = i01 + 1
-			st.add_vertex(grid[i00])
-			st.add_vertex(grid[i10])
-			st.add_vertex(grid[i11])
-			st.add_vertex(grid[i00])
-			st.add_vertex(grid[i11])
-			st.add_vertex(grid[i01])
-	st.index()
-	st.generate_normals()
-	return st.commit()
-
-
-static func _make_heraldic_shield_mesh() -> ArrayMesh:
-	var st: SurfaceTool = SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	st.set_smooth_group(0)
-	var center_front: Vector3 = Vector3(0.0, 0.04, 0.11)
-	var center_back: Vector3 = Vector3(0.0, 0.04, -0.04)
-	var rim: Array[Vector3] = [
-		Vector3(0.0, 0.36, 0.04),
-		Vector3(0.26, 0.3, 0.0),
-		Vector3(0.24, -0.02, 0.0),
-		Vector3(0.14, -0.26, 0.02),
-		Vector3(0.0, -0.4, 0.04),
-		Vector3(-0.14, -0.26, 0.02),
-		Vector3(-0.24, -0.02, 0.0),
-		Vector3(-0.26, 0.3, 0.0)
-	]
-	for i: int in range(rim.size()):
-		var a: Vector3 = rim[i]
-		var b: Vector3 = rim[(i + 1) % rim.size()]
-		st.add_vertex(center_front)
-		st.add_vertex(a)
-		st.add_vertex(b)
-		st.add_vertex(center_back)
-		st.add_vertex(b)
-		st.add_vertex(a)
-	st.index()
-	st.generate_normals()
-	return st.commit()
-
-
-static func _try_load_external_glb(res_path: String) -> Node3D:
-	if not ResourceLoader.exists(res_path):
-		return null
-	var packed: PackedScene = load(res_path) as PackedScene
-	if packed == null:
-		return null
-	var inst: Node = packed.instantiate()
-	if inst is Node3D:
-		return inst as Node3D
-	inst.queue_free()
-	return null
-
-
-# --- Sculpted Stylized Medieval Characters (+ Auto .glb Loader) ---
+# --- Real Rigged .glb Humanoid Characters + Active Runic Guard Barrier ---
 
 static func build_humanoid_rig(root: Node3D, class_id: String, armor_skin_id: String, race_id: String = "HUMAN_VALLEY", appearance: Dictionary = {}) -> Dictionary:
 	for child: Node in root.get_children():
@@ -381,262 +381,99 @@ static func build_humanoid_rig(root: Node3D, class_id: String, armor_skin_id: St
 	var class_def: Dictionary = GameConfig.CLASSES.get(class_id, GameConfig.CLASSES["ARCANE_KNIGHT"]) as Dictionary
 	var race_def: Dictionary = GameConfig.RACES.get(race_id, GameConfig.RACES["HUMAN_VALLEY"]) as Dictionary
 	var race_scale_y: float = float(race_def.get("scale_y", 1.0))
+	var accent: Color = class_def.get("accent_color", Color(0.3, 0.72, 1.0)) as Color
+	var hide_helmet: bool = bool(appearance.get("hide_helmet", false))
 
-	var primary_mat: StandardMaterial3D = make_pbr_material(
-		skin.get("primary", Color(0.5, 0.52, 0.58)) as Color,
-		float(skin.get("roughness", 0.36)),
-		float(skin.get("metallic", 0.72))
-	)
-	var secondary_mat: StandardMaterial3D = make_pbr_material(
-		skin.get("secondary", Color(0.22, 0.19, 0.2)) as Color,
-		0.76,
-		0.15
-	)
-	secondary_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var trim_mat: StandardMaterial3D = make_pbr_material(
-		skin.get("trim", Color(0.86, 0.74, 0.38)) as Color,
-		0.25,
-		0.88
-	)
-	var accent: Color = class_def.get("accent_color", Color(0.3, 0.7, 1.0)) as Color
-	var glow_mat: StandardMaterial3D = make_pbr_material(accent, 0.15, 0.1, accent, 2.4)
-	var skin_hex: String = str(appearance.get("skin_color", ""))
-	var skin_col: Color = Color.html(skin_hex) if skin_hex.length() >= 6 else (race_def.get("default_skin", Color(0.84, 0.68, 0.56)) as Color)
-	var skin_mat: StandardMaterial3D = make_pbr_material(skin_col, 0.72, 0.0)
-	var steel_mat: StandardMaterial3D = make_pbr_material(Color(0.82, 0.86, 0.92), 0.2, 0.94)
-
-	# ModelOrient rotated PI so +Z glTF/sculpted front ALWAYS faces -Z (away from 3rd-person camera)
+	# BodyPivot rotated PI so +Z glTF front faces -Z world forward
 	var body_pivot: Node3D = Node3D.new()
 	body_pivot.name = "BodyPivot"
 	body_pivot.rotation.y = PI
 	body_pivot.scale = Vector3(1.0, race_scale_y, 1.0)
 	root.add_child(body_pivot)
 
-	# Automatic real CC0 .glb loader with Skeleton3D + AnimationPlayer (procedural kept as fallback)
-	var glb_map: Dictionary = {
-		"ARCANE_KNIGHT": "res://Assets/Models/player_knight.glb",
-		"PYROMANCER": "res://Assets/Models/player_mage.glb",
-		"WAR_CLERIC": "res://Assets/Models/player_cleric.glb",
-		"SHADOW_ASSASSIN": "res://Assets/Models/player_rogue.glb",
-		"VALLEY_HUNTER": "res://Assets/Models/player_ranger.glb"
-	}
-	var custom_glb: Node3D = _try_load_external_glb(str(glb_map.get(class_id, "")))
-	if custom_glb != null:
-		custom_glb.name = "ExternalGLB"
-		custom_glb.scale = Vector3.ONE * 0.86
-		body_pivot.add_child(custom_glb)
-		var ap: AnimationPlayer = _find_child_of_type(custom_glb, "AnimationPlayer") as AnimationPlayer
-		var skel: Skeleton3D = _find_child_of_type(custom_glb, "Skeleton3D") as Skeleton3D
-		if ap != null and ap.has_animation("Idle"):
-			var idle_anim: Animation = ap.get_animation("Idle")
-			if idle_anim != null:
-				idle_anim.loop_mode = Animation.LOOP_LINEAR
-			ap.play("Idle")
-		var divine_crown_glb: Node3D = Node3D.new()
-		divine_crown_glb.name = "DivineCrown"
-		divine_crown_glb.position = Vector3(0.0, 2.28, 0.0)
-		divine_crown_glb.visible = false
-		body_pivot.add_child(divine_crown_glb)
-		var crown_mat_g: StandardMaterial3D = make_pbr_material(Color(1.0, 0.88, 0.35), 0.15, 0.92, Color(1.0, 0.85, 0.3), 2.8)
-		_add_torus(divine_crown_glb, 0.28, 0.35, Vector3.ZERO, crown_mat_g, "DivineHalo")
-		var aura_glb: MeshInstance3D = _build_humanoid_grace_aura(root)
-		return {
-			"body_pivot": body_pivot,
-			"torso": custom_glb,
-			"head": custom_glb,
-			"anim_player": ap,
-			"skeleton": skel,
-			"cape": null,
-			"arm_l": null,
-			"arm_r": null,
-			"leg_l": null,
-			"leg_r": null,
-			"weapon_pivot": null,
-			"shield_pivot": null,
-			"divine_crown": divine_crown_glb,
-			"grace_aura": aura_glb
-		}
+	var pair: Array = _get_class_glb_pair(class_id)
+	var custom_glb: Node3D = _instantiate_glb(pair[0] as PackedScene, str(pair[1]))
+	custom_glb.name = "ExternalGLB"
+	custom_glb.scale = Vector3.ONE * 0.88
+	body_pivot.add_child(custom_glb)
 
-	# Anatomical Sculpted Humanoid (Front = +Z inside BodyPivot, rotated PI -> -Z in World!)
-	var torso: Node3D = Node3D.new()
-	torso.name = "Torso"
-	torso.position = Vector3(0.0, 1.14, 0.0)
-	body_pivot.add_child(torso)
+	_configure_class_glb_attachments(custom_glb, class_id, hide_helmet)
 
-	# Sculpted lofted anatomical cuirass / jerkin / mage robe (zero boxes!)
-	if class_id == "PYROMANCER":
-		# Flowing conical wizard robe with pleated lower skirt
-		var robe_rings: Array = [
-			{"pos": Vector3(0.0, -0.96, 0.0), "rx": 0.44, "ry": 0.4},
-			{"pos": Vector3(0.0, -0.58, 0.0), "rx": 0.34, "ry": 0.3},
-			{"pos": Vector3(0.0, -0.24, 0.0), "rx": 0.21, "ry": 0.18},
-			{"pos": Vector3(0.0, 0.14, 0.02), "rx": 0.26, "ry": 0.2},
-			{"pos": Vector3(0.0, 0.34, 0.0), "rx": 0.23, "ry": 0.17}
-		]
-		_add_lofted(torso, robe_rings, secondary_mat, "MageRobe", 16)
-		_add_torus(torso, 0.16, 0.23, Vector3(0.0, -0.22, 0.0), trim_mat, "RobeSash")
-		# Floating runic shoulder rings
-		_add_torus(torso, 0.11, 0.15, Vector3(-0.38, 0.34, 0.0), glow_mat, "RuneHaloL", Vector3(24.0, 0.0, 28.0))
-		_add_torus(torso, 0.11, 0.15, Vector3(0.38, 0.34, 0.0), glow_mat, "RuneHaloR", Vector3(24.0, 0.0, -28.0))
-	else:
-		# Sculpted athletic medieval cuirass / leather vest
-		var chest_rings: Array = [
-			{"pos": Vector3(0.0, -0.32, 0.0), "rx": 0.21, "ry": 0.16},
-			{"pos": Vector3(0.0, -0.1, 0.01), "rx": 0.23, "ry": 0.18},
-			{"pos": Vector3(0.0, 0.14, 0.03), "rx": 0.3, "ry": 0.22},
-			{"pos": Vector3(0.0, 0.34, 0.01), "rx": 0.25, "ry": 0.17}
-		]
-		var chest_mat: Material = secondary_mat if class_id == "SHADOW_ASSASSIN" else primary_mat
-		_add_lofted(torso, chest_rings, chest_mat, "SculptedCuirass", 16)
-		_add_torus(torso, 0.18, 0.24, Vector3(0.0, -0.26, 0.0), trim_mat, "WaistBelt")
-		_add_sphere(torso, 0.08, Vector3(0.0, 0.14, 0.22), glow_mat, "ClassGem", Vector3(1.1, 1.3, 0.45))
-		if class_id == "WAR_CLERIC":
-			# Sculpted golden tabard front
-			_add_cylinder(torso, 0.18, 0.25, 0.56, Vector3(0.0, -0.5, 0.04), trim_mat, "Tabard", 12)
-		elif class_id == "SHADOW_ASSASSIN":
-			# Crossed leather bandolier sash
-			_add_torus(torso, 0.21, 0.25, Vector3(0.0, 0.02, 0.01), trim_mat, "Bandolier", Vector3(0.0, 0.0, 48.0))
+	# Apply subtle cosmetic armor tint without washing out the real .glb textures
+	if armor_skin_id != "default_iron":
+		var primary_col: Color = skin.get("primary", Color(0.55, 0.58, 0.64)) as Color
+		_tint_glb_materials(custom_glb, primary_col, 0.34, float(skin.get("metallic", 0.3)) * 0.35)
+	elif appearance.has("armor_tint"):
+		var tint_hex: String = str(appearance.get("armor_tint", ""))
+		if tint_hex.length() >= 6:
+			_tint_glb_materials(custom_glb, Color.html(tint_hex), 0.22, 0.08)
 
-	# Flowing sculpted cloth cape on back (-Z in local BodyPivot, which faces camera in world!)
-	var cape: Node3D = Node3D.new()
-	cape.name = "Cape"
-	cape.position = Vector3(0.0, 0.3, -0.16)
-	torso.add_child(cape)
-	var cape_mi: MeshInstance3D = MeshInstance3D.new()
-	cape_mi.name = "CapeCloth"
-	cape_mi.mesh = _make_curved_cape_mesh()
-	cape_mi.material_override = secondary_mat
-	cape.add_child(cape_mi)
-
-	# Neck & Sculpted Head / Helmet / Wizard Hat / Rogue Cowl
-	_add_cylinder(torso, 0.08, 0.1, 0.16, Vector3(0.0, 0.39, 0.0), skin_mat, "Neck", 12)
-	var head: Node3D = Node3D.new()
-	head.name = "Head"
-	head.position = Vector3(0.0, 0.54, 0.0)
-	torso.add_child(head)
-	_add_sphere(head, 0.18, Vector3(0.0, 0.02, 0.0), skin_mat, "HeadBase", Vector3(0.92, 1.05, 0.96))
-
-	if class_id == "PYROMANCER":
-		# Pointed medieval wizard hat with curved brim & glowing band
-		_add_cylinder(head, 0.38, 0.42, 0.04, Vector3(0.0, 0.14, 0.0), secondary_mat, "HatBrim", 18)
-		_add_torus(head, 0.16, 0.2, Vector3(0.0, 0.17, 0.0), glow_mat, "HatBand")
-		_add_cylinder(head, 0.02, 0.19, 0.52, Vector3(0.0, 0.42, -0.06), secondary_mat, "HatCone", 14, Vector3(-16.0, 0.0, 0.0))
-	elif class_id == "SHADOW_ASSASSIN":
-		# Fitted sculpted hood + shadow face mask + glowing eyes
-		_add_sphere(head, 0.22, Vector3(0.0, 0.05, -0.02), secondary_mat, "RogueHood", Vector3(0.98, 1.12, 1.08))
-		_add_sphere(head, 0.035, Vector3(-0.07, 0.05, 0.17), glow_mat, "EyeL")
-		_add_sphere(head, 0.035, Vector3(0.07, 0.05, 0.17), glow_mat, "EyeR")
-	else:
-		# Sculpted domed knight/paladin helm with curved visor & crest plume
-		_add_sphere(head, 0.215, Vector3(0.0, 0.05, 0.0), primary_mat, "KnightHelm", Vector3(0.95, 1.08, 1.04))
-		_add_torus(head, 0.15, 0.19, Vector3(0.0, 0.05, 0.04), trim_mat, "VisorRim", Vector3(90.0, 0.0, 0.0))
-		_add_capsule(head, 0.03, 0.16, Vector3(0.0, 0.06, 0.19), glow_mat, "VisorGlow", Vector3(0.0, 0.0, 90.0))
-		_add_capsule(head, 0.045, 0.26, Vector3(0.0, 0.27, -0.04), trim_mat, "HelmCrest", Vector3(72.0, 0.0, 0.0))
+	var ap: AnimationPlayer = _find_child_of_type(custom_glb, "AnimationPlayer") as AnimationPlayer
+	var skel: Skeleton3D = _find_child_of_type(custom_glb, "Skeleton3D") as Skeleton3D
+	if ap != null and ap.has_animation("Idle"):
+		var idle_anim: Animation = ap.get_animation("Idle")
+		if idle_anim != null:
+			idle_anim.loop_mode = Animation.LOOP_LINEAR
+		ap.play("Idle")
 
 	# Divine Avatar Crown
 	var divine_crown: Node3D = Node3D.new()
 	divine_crown.name = "DivineCrown"
-	divine_crown.position = Vector3(0.0, 0.48, 0.0)
+	divine_crown.position = Vector3(0.0, 2.28, 0.0)
 	divine_crown.visible = false
-	head.add_child(divine_crown)
+	body_pivot.add_child(divine_crown)
 	var crown_mat: StandardMaterial3D = make_pbr_material(Color(1.0, 0.88, 0.35), 0.15, 0.92, Color(1.0, 0.85, 0.3), 2.8)
-	_add_torus(divine_crown, 0.26, 0.32, Vector3.ZERO, crown_mat, "DivineHalo")
-	_add_cylinder(divine_crown, 0.01, 0.06, 0.28, Vector3(0.0, 0.16, 0.22), crown_mat, "CrownSpire", 8)
+	_add_torus(divine_crown, 0.28, 0.35, Vector3.ZERO, crown_mat, "DivineHalo")
 
-	# Sculpted Curved Arms & Domed Pauldrons (Zero Boxes!)
-	var arm_l: Node3D = Node3D.new()
-	arm_l.name = "ArmL"
-	arm_l.position = Vector3(0.35, 0.25, 0.0)
-	torso.add_child(arm_l)
-	_add_sphere(arm_l, 0.15, Vector3(0.02, 0.04, 0.0), trim_mat, "PauldronL", Vector3(1.15, 0.88, 1.05))
-	_add_capsule(arm_l, 0.085, 0.56, Vector3(0.0, -0.26, 0.0), primary_mat, "ArmCapL")
+	# Active Block / Defense Runic Energy Barrier (front of character at -Z in root space)
+	var block_barrier: Node3D = _build_runic_block_barrier(root, accent, Vector3(0.0, 1.18, -0.78), 1.0)
+	var aura_glb: MeshInstance3D = _build_humanoid_grace_aura(root)
 
-	var arm_r: Node3D = Node3D.new()
-	arm_r.name = "ArmR"
-	arm_r.position = Vector3(-0.35, 0.25, 0.0)
-	torso.add_child(arm_r)
-	_add_sphere(arm_r, 0.15, Vector3(-0.02, 0.04, 0.0), trim_mat, "PauldronR", Vector3(1.15, 0.88, 1.05))
-	_add_capsule(arm_r, 0.085, 0.56, Vector3(0.0, -0.26, 0.0), primary_mat, "ArmCapR")
-
-	# Detailed Medieval Class Weapons (pointing +Z inside BodyPivot -> -Z world forward!)
-	var weapon_pivot: Node3D = Node3D.new()
-	weapon_pivot.name = "WeaponPivot"
-	weapon_pivot.position = Vector3(0.0, -0.52, 0.1)
-	arm_r.add_child(weapon_pivot)
-
-	var shield_pivot: Node3D = Node3D.new()
-	shield_pivot.name = "ShieldPivot"
-	shield_pivot.position = Vector3(0.08, -0.44, 0.12)
-	arm_l.add_child(shield_pivot)
-
-	var weapon_style: String = str(class_def.get("weapon_style", "sword_shield"))
-	if weapon_style == "sword_shield":
-		_add_cylinder(weapon_pivot, 0.032, 0.032, 0.26, Vector3(0.0, 0.0, 0.1), trim_mat, "Hilt", 10, Vector3(90.0, 0.0, 0.0))
-		_add_sphere(weapon_pivot, 0.055, Vector3(0.0, 0.0, -0.04), trim_mat, "Pommel")
-		_add_capsule(weapon_pivot, 0.035, 0.34, Vector3(0.0, 0.0, 0.22), trim_mat, "Crossguard", Vector3(0.0, 0.0, 90.0))
-		# Beveled tapered longsword blade using PrismMesh
-		_add_prism(weapon_pivot, Vector3(0.09, 1.05, 0.035), Vector3(0.0, 0.0, 0.76), steel_mat, "BeveledBlade", Vector3(90.0, 0.0, 0.0))
-		_add_capsule(weapon_pivot, 0.018, 0.68, Vector3(0.0, 0.0, 0.68), glow_mat, "RunicEdge", Vector3(90.0, 0.0, 0.0))
-		# Curved heraldic shield
-		var sh_mi: MeshInstance3D = MeshInstance3D.new()
-		sh_mi.name = "HeraldicShield"
-		sh_mi.mesh = _make_heraldic_shield_mesh()
-		sh_mi.material_override = primary_mat
-		sh_mi.position = Vector3(0.04, 0.0, 0.06)
-		shield_pivot.add_child(sh_mi)
-		_add_sphere(shield_pivot, 0.09, Vector3(0.04, 0.04, 0.16), glow_mat, "ShieldCrest", Vector3(1.0, 1.2, 0.45))
-	elif weapon_style == "staff":
-		_add_cylinder(weapon_pivot, 0.032, 0.044, 1.85, Vector3(0.0, 0.18, 0.14), secondary_mat, "GnarledStaff", 10)
-		_add_torus(weapon_pivot, 0.14, 0.18, Vector3(0.0, 1.15, 0.14), trim_mat, "StaffCradle", Vector3(90.0, 0.0, 0.0))
-		_add_sphere(weapon_pivot, 0.13, Vector3(0.0, 1.15, 0.14), glow_mat, "ArcaneCrystal")
-		_add_sphere(shield_pivot, 0.11, Vector3(0.0, -0.05, 0.12), glow_mat, "HandArcaneAura")
-	elif weapon_style == "mace_shield":
-		_add_cylinder(weapon_pivot, 0.034, 0.038, 0.92, Vector3(0.0, 0.0, 0.44), secondary_mat, "MaceShaft", 10, Vector3(90.0, 0.0, 0.0))
-		_add_sphere(weapon_pivot, 0.15, Vector3(0.0, 0.0, 0.92), trim_mat, "MaceHead")
-		_add_torus(weapon_pivot, 0.14, 0.18, Vector3(0.0, 0.0, 0.92), glow_mat, "MaceHalo")
-		var sh_cleric: MeshInstance3D = MeshInstance3D.new()
-		sh_cleric.name = "SanctifiedShield"
-		sh_cleric.mesh = _make_heraldic_shield_mesh()
-		sh_cleric.material_override = trim_mat
-		sh_cleric.scale = Vector3(1.12, 1.16, 1.0)
-		shield_pivot.add_child(sh_cleric)
-		_add_capsule(shield_pivot, 0.035, 0.4, Vector3(0.0, 0.02, 0.14), glow_mat, "HolyEmblem")
-	elif weapon_style == "daggers":
-		_add_prism(weapon_pivot, Vector3(0.06, 0.62, 0.025), Vector3(0.0, 0.0, 0.36), steel_mat, "DaggerR", Vector3(90.0, 0.0, 0.0))
-		_add_capsule(weapon_pivot, 0.015, 0.38, Vector3(0.0, 0.0, 0.34), glow_mat, "DaggerGlowR", Vector3(90.0, 0.0, 0.0))
-		_add_prism(shield_pivot, Vector3(0.06, 0.62, 0.025), Vector3(0.0, 0.0, 0.36), steel_mat, "DaggerL", Vector3(90.0, 0.0, 0.0))
-		_add_capsule(shield_pivot, 0.015, 0.38, Vector3(0.0, 0.0, 0.34), glow_mat, "DaggerGlowL", Vector3(90.0, 0.0, 0.0))
-
-	# Sculpted Legs & Tapered Greaves (Zero Boxes!)
-	var leg_l: Node3D = Node3D.new()
-	leg_l.name = "LegL"
-	leg_l.position = Vector3(0.15, 0.78, 0.0)
-	body_pivot.add_child(leg_l)
-	_add_capsule(leg_l, 0.095, 0.68, Vector3(0.0, -0.34, 0.0), secondary_mat, "LegCapL")
-	_add_cylinder(leg_l, 0.11, 0.095, 0.34, Vector3(0.0, -0.58, 0.02), primary_mat, "GreaveL", 12)
-
-	var leg_r: Node3D = Node3D.new()
-	leg_r.name = "LegR"
-	leg_r.position = Vector3(-0.15, 0.78, 0.0)
-	body_pivot.add_child(leg_r)
-	_add_capsule(leg_r, 0.095, 0.68, Vector3(0.0, -0.34, 0.0), secondary_mat, "LegCapR")
-	_add_cylinder(leg_r, 0.11, 0.095, 0.34, Vector3(0.0, -0.58, 0.02), primary_mat, "GreaveR", 12)
-
-	var grace_aura: MeshInstance3D = _build_humanoid_grace_aura(root)
 	return {
 		"body_pivot": body_pivot,
-		"torso": torso,
-		"head": head,
-		"cape": cape,
-		"arm_l": arm_l,
-		"arm_r": arm_r,
-		"leg_l": leg_l,
-		"leg_r": leg_r,
-		"weapon_pivot": weapon_pivot,
-		"shield_pivot": shield_pivot,
+		"model_root": custom_glb,
+		"anim_player": ap,
+		"skeleton": skel,
+		"block_barrier": block_barrier,
 		"divine_crown": divine_crown,
-		"grace_aura": grace_aura
+		"grace_aura": aura_glb
 	}
+
+
+static func _build_runic_block_barrier(parent: Node3D, accent: Color, local_pos: Vector3, barrier_scale: float = 1.0) -> Node3D:
+	var barrier_root: Node3D = Node3D.new()
+	barrier_root.name = "RunicBlockBarrier"
+	barrier_root.position = local_pos
+	barrier_root.scale = Vector3.ONE * barrier_scale
+	barrier_root.visible = false
+	parent.add_child(barrier_root)
+
+	var rune_col: Color = accent.lerp(Color(0.45, 0.88, 1.0), 0.45)
+	var disc_mat: StandardMaterial3D = make_pbr_material(Color(rune_col.r, rune_col.g, rune_col.b, 0.28), 0.08, 0.15, rune_col, 2.4)
+	disc_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	disc_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var ring_mat: StandardMaterial3D = make_pbr_material(Color(rune_col.r, rune_col.g, rune_col.b, 0.82), 0.1, 0.2, rune_col.lightened(0.35), 3.4)
+	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+
+	# Hexagonal translucent runic shield disc
+	var hex_disc: MeshInstance3D = MeshInstance3D.new()
+	hex_disc.name = "RuneDisc"
+	var cm: CylinderMesh = CylinderMesh.new()
+	cm.top_radius = 0.72
+	cm.bottom_radius = 0.72
+	cm.height = 0.04
+	cm.radial_segments = 6
+	hex_disc.mesh = cm
+	hex_disc.rotation_degrees = Vector3(90.0, 0.0, 0.0)
+	hex_disc.material_override = disc_mat
+	barrier_root.add_child(hex_disc)
+
+	# Outer & inner glowing runic rings (spun smoothly in PlayerController)
+	_add_torus(barrier_root, 0.64, 0.73, Vector3.ZERO, ring_mat, "OuterRuneRing", Vector3(90.0, 0.0, 0.0))
+	_add_torus(barrier_root, 0.34, 0.4, Vector3(0.0, 0.0, -0.03), ring_mat, "InnerRuneRing", Vector3(90.0, 0.0, 0.0))
+
+	return barrier_root
 
 
 static func _build_humanoid_grace_aura(root: Node3D) -> MeshInstance3D:
@@ -653,70 +490,100 @@ static func _build_humanoid_grace_aura(root: Node3D) -> MeshInstance3D:
 	return grace_aura
 
 
+# --- First-Person Viewmodel Using Real .glb Weapon & Shield Meshes ---
+
+static func _extract_glb_weapon_mesh(glb_root: Node3D, node_name: String) -> MeshInstance3D:
+	var src: Node = _find_child_by_name(glb_root, node_name)
+	if src is MeshInstance3D and (src as MeshInstance3D).mesh != null:
+		var mi: MeshInstance3D = MeshInstance3D.new()
+		mi.name = "FP_" + node_name
+		mi.mesh = (src as MeshInstance3D).mesh
+		for s: int in range(mi.mesh.get_surface_count()):
+			var mat: Material = (src as MeshInstance3D).get_active_material(s)
+			if mat is BaseMaterial3D:
+				var dup: BaseMaterial3D = mat.duplicate() as BaseMaterial3D
+				dup.subsurf_scatter_enabled = false
+				mi.set_surface_override_material(s, dup)
+		return mi
+	return null
+
+
 static func build_first_person_viewmodel(root: Node3D, class_id: String, armor_skin_id: String) -> Dictionary:
 	for child: Node in root.get_children():
 		child.queue_free()
 
-	var skin: Dictionary = GameConfig.COSMETIC_ARMORS.get(armor_skin_id, GameConfig.COSMETIC_ARMORS["default_iron"]) as Dictionary
 	var class_def: Dictionary = GameConfig.CLASSES.get(class_id, GameConfig.CLASSES["ARCANE_KNIGHT"]) as Dictionary
-	var primary_mat: StandardMaterial3D = make_pbr_material(skin.get("primary", Color(0.5, 0.5, 0.55)) as Color, 0.35, 0.72)
-	var secondary_mat: StandardMaterial3D = make_pbr_material(skin.get("secondary", Color(0.25, 0.22, 0.22)) as Color, 0.72, 0.2)
-	var trim_mat: StandardMaterial3D = make_pbr_material(skin.get("trim", Color(0.85, 0.75, 0.4)) as Color, 0.25, 0.88)
-	var accent: Color = class_def.get("accent_color", Color(0.3, 0.7, 1.0)) as Color
-	var glow_mat: StandardMaterial3D = make_pbr_material(accent, 0.15, 0.1, accent, 2.4)
-	var steel_mat: StandardMaterial3D = make_pbr_material(Color(0.82, 0.86, 0.92), 0.2, 0.94)
+	var accent: Color = class_def.get("accent_color", Color(0.3, 0.72, 1.0)) as Color
+	var pair: Array = _get_class_glb_pair(class_id)
+	var temp_glb: Node3D = _instantiate_glb(pair[0] as PackedScene, str(pair[1]))
 
 	var right_hand: Node3D = Node3D.new()
 	right_hand.name = "FPRightHand"
-	right_hand.position = Vector3(0.36, -0.3, -0.58)
+	right_hand.position = Vector3(0.36, -0.32, -0.58)
 	root.add_child(right_hand)
-	_add_capsule(right_hand, 0.065, 0.36, Vector3(0.0, -0.03, 0.14), primary_mat, "GauntletR", Vector3(90.0, 0.0, 0.0))
 
 	var left_hand: Node3D = Node3D.new()
 	left_hand.name = "FPLeftHand"
 	left_hand.position = Vector3(-0.38, -0.34, -0.55)
 	root.add_child(left_hand)
-	_add_capsule(left_hand, 0.065, 0.36, Vector3(0.0, -0.03, 0.14), primary_mat, "GauntletL", Vector3(90.0, 0.0, 0.0))
 
-	var weapon_style: String = str(class_def.get("weapon_style", "sword_shield"))
-	if weapon_style == "sword_shield":
-		_add_cylinder(right_hand, 0.025, 0.025, 0.2, Vector3(0.0, 0.04, -0.04), trim_mat, "FPHilt")
-		_add_capsule(right_hand, 0.026, 0.24, Vector3(0.0, 0.12, -0.08), trim_mat, "FPGuard", Vector3(0.0, 0.0, 90.0))
-		_add_prism(right_hand, Vector3(0.065, 0.82, 0.028), Vector3(0.0, 0.52, -0.12), steel_mat, "FPBlade")
-		_add_capsule(right_hand, 0.014, 0.52, Vector3(0.0, 0.5, -0.12), glow_mat, "FPRune")
-		var sh: MeshInstance3D = MeshInstance3D.new()
-		sh.mesh = _make_heraldic_shield_mesh()
-		sh.material_override = primary_mat
-		sh.position = Vector3(-0.02, 0.1, -0.14)
-		sh.rotation_degrees = Vector3(0.0, 155.0, 0.0)
-		sh.scale = Vector3(0.82, 0.82, 0.82)
-		left_hand.add_child(sh)
-	elif weapon_style == "staff":
-		_add_cylinder(right_hand, 0.026, 0.034, 1.15, Vector3(0.0, 0.28, -0.14), secondary_mat, "FPStaff")
-		_add_torus(right_hand, 0.1, 0.13, Vector3(0.0, 0.9, -0.14), trim_mat, "FPCradle", Vector3(90.0, 0.0, 0.0))
-		_add_sphere(right_hand, 0.095, Vector3(0.0, 0.9, -0.14), glow_mat, "FPFireOrb")
-		_add_sphere(left_hand, 0.08, Vector3(0.0, 0.08, -0.14), glow_mat, "FPMagicSpark")
-	elif weapon_style == "mace_shield":
-		_add_cylinder(right_hand, 0.026, 0.03, 0.65, Vector3(0.0, 0.26, -0.12), secondary_mat, "FPMaceShaft")
-		_add_sphere(right_hand, 0.12, Vector3(0.0, 0.62, -0.12), trim_mat, "FPMaceHead")
-		_add_torus(right_hand, 0.11, 0.14, Vector3(0.0, 0.62, -0.12), glow_mat, "FPMaceHalo")
-		var sh_c: MeshInstance3D = MeshInstance3D.new()
-		sh_c.mesh = _make_heraldic_shield_mesh()
-		sh_c.material_override = trim_mat
-		sh_c.position = Vector3(-0.02, 0.1, -0.14)
-		sh_c.rotation_degrees = Vector3(0.0, 155.0, 0.0)
-		sh_c.scale = Vector3(0.86, 0.86, 0.86)
-		left_hand.add_child(sh_c)
-	elif weapon_style == "daggers":
-		_add_prism(right_hand, Vector3(0.048, 0.46, 0.022), Vector3(0.0, 0.24, -0.14), steel_mat, "FPDaggerR")
-		_add_capsule(right_hand, 0.012, 0.3, Vector3(0.0, 0.24, -0.14), glow_mat, "FPDaggerEdgeR")
-		_add_prism(left_hand, Vector3(0.048, 0.46, 0.022), Vector3(0.0, 0.24, -0.14), steel_mat, "FPDaggerL")
-		_add_capsule(left_hand, 0.012, 0.3, Vector3(0.0, 0.24, -0.14), glow_mat, "FPDaggerEdgeL")
+	var r_weapon_name: String = "1H_Sword"
+	var l_weapon_name: String = "Badge_Shield"
+	var r_scale: float = 0.42
+	var l_scale: float = 0.45
+	var r_rot: Vector3 = Vector3(-18.0, 180.0, 0.0)
+	var l_rot: Vector3 = Vector3(0.0, 165.0, 0.0)
 
-	return {"right_hand": right_hand, "left_hand": left_hand}
+	if class_id == "PYROMANCER":
+		r_weapon_name = "2H_Staff"
+		l_weapon_name = "Spellbook_open"
+		r_scale = 0.42
+		l_scale = 0.38
+		r_rot = Vector3(-12.0, 180.0, 0.0)
+		l_rot = Vector3(24.0, 155.0, 0.0)
+	elif class_id == "WAR_CLERIC":
+		r_weapon_name = "1H_Axe"
+		l_weapon_name = "Barbarian_Round_Shield"
+		r_scale = 0.44
+		l_scale = 0.44
+	elif class_id == "SHADOW_ASSASSIN":
+		r_weapon_name = "Knife"
+		l_weapon_name = "Knife_Offhand"
+		r_scale = 0.48
+		l_scale = 0.48
+		l_rot = Vector3(-18.0, 180.0, 0.0)
+	elif class_id == "VALLEY_HUNTER":
+		r_weapon_name = "2H_Crossbow"
+		l_weapon_name = ""
+		r_scale = 0.44
+		r_rot = Vector3(0.0, 90.0, 0.0)
+
+	var r_mesh: MeshInstance3D = _extract_glb_weapon_mesh(temp_glb, r_weapon_name)
+	if r_mesh != null:
+		r_mesh.scale = Vector3.ONE * r_scale
+		r_mesh.rotation_degrees = r_rot
+		right_hand.add_child(r_mesh)
+
+	if not l_weapon_name.is_empty():
+		var l_mesh: MeshInstance3D = _extract_glb_weapon_mesh(temp_glb, l_weapon_name)
+		if l_mesh != null:
+			l_mesh.scale = Vector3.ONE * l_scale
+			l_mesh.rotation_degrees = l_rot
+			left_hand.add_child(l_mesh)
+
+	temp_glb.free()
+
+	if armor_skin_id != "default_iron":
+		var skin: Dictionary = GameConfig.COSMETIC_ARMORS.get(armor_skin_id, {}) as Dictionary
+		var pcol: Color = skin.get("primary", Color(0.7, 0.7, 0.75)) as Color
+		_tint_glb_materials(right_hand, pcol, 0.25, 0.2)
+		_tint_glb_materials(left_hand, pcol, 0.25, 0.2)
+
+	var fp_barrier: Node3D = _build_runic_block_barrier(root, accent, Vector3(0.0, -0.06, -0.72), 0.55)
+	return {"right_hand": right_hand, "left_hand": left_hand, "block_barrier": fp_barrier}
 
 
-# --- Sculpted Organic High-Detail Dragon (ZERO BoxMesh + Subsurface Wings + Auto .glb) ---
+# --- Real Rigged dragon.glb Mount (Zero Procedural Blocks/Capsules/Subsurface) ---
 
 static func build_dragon_rig(root: Node3D, dragon_skin_id: String, trail_id: String) -> Dictionary:
 	for child: Node in root.get_children():
@@ -728,185 +595,66 @@ static func build_dragon_rig(root: Node3D, dragon_skin_id: String, trail_id: Str
 	var wing_col: Color = skin.get("wings", Color(0.45, 0.1, 0.1)) as Color
 	var breath_col: Color = skin.get("breath", Color(1.0, 0.45, 0.12)) as Color
 
-	var scale_mat: StandardMaterial3D = make_pbr_material(scale_col, 0.34, 0.38)
-	var belly_mat: StandardMaterial3D = make_pbr_material(belly_col, 0.48, 0.18)
-	var wing_mat: StandardMaterial3D = make_wing_membrane_material(wing_col, breath_col.lerp(Color(1.0, 0.65, 0.28), 0.5))
-	var horn_mat: StandardMaterial3D = make_pbr_material(Color(0.16, 0.14, 0.12), 0.28, 0.35)
-	var eye_mat: StandardMaterial3D = make_pbr_material(breath_col, 0.1, 0.0, breath_col, 3.2)
-	var saddle_mat: StandardMaterial3D = make_pbr_material(Color(0.28, 0.16, 0.09), 0.62, 0.18)
-
 	var body: Node3D = Node3D.new()
 	body.name = "DragonBody"
 	root.add_child(body)
 
-	# Auto-load real rigged dragon.glb (Quaternius CC0) oriented -Z with AnimationPlayer & Skeleton3D
-	var custom_dragon: Node3D = _try_load_external_glb("res://Assets/Models/dragon.glb")
-	if custom_dragon != null:
-		custom_dragon.name = "ExternalDragonGLB"
-		custom_dragon.rotation.y = PI
-		custom_dragon.scale = Vector3.ONE * 1.45
-		body.add_child(custom_dragon)
-		var dap: AnimationPlayer = _find_child_of_type(custom_dragon, "AnimationPlayer") as AnimationPlayer
-		var dskel: Skeleton3D = _find_child_of_type(custom_dragon, "Skeleton3D") as Skeleton3D
-		if dap != null and dap.has_animation("Dragon_Flying"):
-			var fa: Animation = dap.get_animation("Dragon_Flying")
-			if fa != null:
-				fa.loop_mode = Animation.LOOP_LINEAR
-			dap.play("Dragon_Flying")
-		var cone_glb: MeshInstance3D = _make_dragon_breath_cone(body, breath_col, Vector3(0.0, 2.3, -11.5))
-		var aura_glb: MeshInstance3D = _make_dragon_grace_aura(body)
-		return {
-			"body": body, "neck": custom_dragon, "head": custom_dragon, "jaw": null,
-			"anim_player": dap, "skeleton": dskel,
-			"tail_1": null, "tail_2": null, "wing_l_root": null, "wing_l_tip": null,
-			"wing_r_root": null, "wing_r_tip": null, "breath_cone": cone_glb,
-			"trail": null, "grace_aura": aura_glb
-		}
+	var custom_dragon: Node3D = _instantiate_glb(GLB_DRAGON, GLB_PATH_DRAGON)
+	custom_dragon.name = "ExternalDragonGLB"
+	custom_dragon.rotation.y = PI
+	custom_dragon.scale = Vector3.ONE * 1.55
+	body.add_child(custom_dragon)
 
-	# 1. Sculpted Aerodynamic Muscular Torso (Lofted curved elliptical cross-sections, facing -Z)
-	var torso_rings: Array = [
-		{"pos": Vector3(0.0, 1.38, 1.95), "rx": 0.44, "ry": 0.38},
-		{"pos": Vector3(0.0, 1.56, 1.15), "rx": 0.72, "ry": 0.6},
-		{"pos": Vector3(0.0, 1.62, 0.25), "rx": 0.82, "ry": 0.68},
-		{"pos": Vector3(0.0, 1.72, -0.75), "rx": 0.94, "ry": 0.78},
-		{"pos": Vector3(0.0, 1.68, -1.65), "rx": 0.62, "ry": 0.56}
-	]
-	_add_lofted(body, torso_rings, scale_mat, "SculptedTorso", 16)
+	# Apply dragon cosmetic skin colors onto duplicated GLB surface materials (no subsurface!)
+	var d_meshes: Array[MeshInstance3D] = []
+	_collect_mesh_instances(custom_dragon, d_meshes)
+	for mi: MeshInstance3D in d_meshes:
+		if mi.mesh == null:
+			continue
+		for s: int in range(mi.mesh.get_surface_count()):
+			var base_mat: Material = mi.get_surface_override_material(s)
+			if base_mat == null:
+				base_mat = mi.mesh.surface_get_material(s)
+			if base_mat is BaseMaterial3D:
+				var bm: BaseMaterial3D = base_mat.duplicate() as BaseMaterial3D
+				bm.subsurf_scatter_enabled = false
+				var mname: String = bm.resource_name.to_lower()
+				if mname.contains("belly"):
+					bm.albedo_color = belly_col
+					bm.roughness = 0.5
+				elif mname.contains("wing"):
+					bm.albedo_color = wing_col
+					bm.cull_mode = BaseMaterial3D.CULL_DISABLED
+					bm.roughness = 0.52
+				elif mname.contains("eye"):
+					bm.albedo_color = breath_col
+					bm.emission_enabled = true
+					bm.emission = breath_col
+					bm.emission_energy_multiplier = 3.0
+				elif mname.contains("claw"):
+					bm.albedo_color = Color(0.16, 0.14, 0.12)
+					bm.roughness = 0.3
+				else:
+					bm.albedo_color = scale_col
+					bm.roughness = 0.38
+					bm.metallic = 0.25
+				mi.set_surface_override_material(s, bm)
 
-	# Plated armored belly keel
-	var belly_rings: Array = [
-		{"pos": Vector3(0.0, 1.12, 1.45), "rx": 0.34, "ry": 0.16},
-		{"pos": Vector3(0.0, 1.02, 0.2), "rx": 0.58, "ry": 0.22},
-		{"pos": Vector3(0.0, 1.06, -0.85), "rx": 0.64, "ry": 0.24},
-		{"pos": Vector3(0.0, 1.24, -1.55), "rx": 0.36, "ry": 0.16}
-	]
-	_add_lofted(body, belly_rings, belly_mat, "ArmoredBelly", 12)
+	var dap: AnimationPlayer = _find_child_of_type(custom_dragon, "AnimationPlayer") as AnimationPlayer
+	var dskel: Skeleton3D = _find_child_of_type(custom_dragon, "Skeleton3D") as Skeleton3D
+	if dap != null and dap.has_animation("Dragon_Flying"):
+		var fa: Animation = dap.get_animation("Dragon_Flying")
+		if fa != null:
+			fa.loop_mode = Animation.LOOP_LINEAR
+		dap.play("Dragon_Flying")
 
-	# Curved Leather Saddle
-	_add_sphere(body, 0.55, Vector3(0.0, 2.28, -0.22), saddle_mat, "RiderSaddle", Vector3(1.0, 0.34, 1.25))
-
-	# Swept Dorsal Spines along the back
-	for i: int in range(6):
-		var z_p: float = -1.25 + float(i) * 0.56
-		var y_p: float = 2.42 - absf(z_p + 0.3) * 0.12
-		_add_prism(body, Vector3(0.12, 0.42, 0.32), Vector3(0.0, y_p, z_p), horn_mat, "DorsalSpine_%d" % i, Vector3(-24.0, 0.0, 0.0))
-
-	# 2. Long S-Curved Articulated Neck (facing -Z)
-	var neck: Node3D = Node3D.new()
-	neck.name = "Neck"
-	neck.position = Vector3(0.0, 1.72, -1.55)
-	body.add_child(neck)
-	var neck_rings: Array = [
-		{"pos": Vector3(0.0, -0.05, 0.12), "rx": 0.54, "ry": 0.48},
-		{"pos": Vector3(0.0, 0.12, -0.55), "rx": 0.44, "ry": 0.4},
-		{"pos": Vector3(0.0, 0.48, -1.15), "rx": 0.38, "ry": 0.35},
-		{"pos": Vector3(0.0, 0.82, -1.68), "rx": 0.34, "ry": 0.32}
-	]
-	_add_lofted(neck, neck_rings, scale_mat, "SCurvedNeck", 14)
-
-	# 3. Sculpted Draconic Head + Articulated Opening Lower Jaw + Swept Curved Horns
-	var head: Node3D = Node3D.new()
-	head.name = "Head"
-	head.position = Vector3(0.0, 0.86, -1.72)
-	neck.add_child(head)
-
-	var skull_rings: Array = [
-		{"pos": Vector3(0.0, 0.06, 0.18), "rx": 0.42, "ry": 0.34},
-		{"pos": Vector3(0.0, 0.1, -0.32), "rx": 0.38, "ry": 0.3},
-		{"pos": Vector3(0.0, 0.04, -0.95), "rx": 0.26, "ry": 0.2},
-		{"pos": Vector3(0.0, -0.02, -1.48), "rx": 0.14, "ry": 0.11}
-	]
-	_add_lofted(head, skull_rings, scale_mat, "DragonSkull", 14)
-
-	# Articulated Lower Jaw (rotates open when breathing fire!)
-	var jaw: Node3D = Node3D.new()
-	jaw.name = "Jaw"
-	jaw.position = Vector3(0.0, -0.1, -0.15)
-	head.add_child(jaw)
-	var jaw_rings: Array = [
-		{"pos": Vector3(0.0, 0.0, 0.1), "rx": 0.32, "ry": 0.14},
-		{"pos": Vector3(0.0, -0.06, -0.58), "rx": 0.22, "ry": 0.11},
-		{"pos": Vector3(0.0, -0.05, -1.22), "rx": 0.11, "ry": 0.08}
-	]
-	_add_lofted(jaw, jaw_rings, belly_mat, "LowerJaw", 12)
-
-	# Glowing Emissive Eyes + Brow Ridges
-	_add_sphere(head, 0.09, Vector3(-0.31, 0.14, -0.45), eye_mat, "EyeL", Vector3(0.85, 0.72, 1.3))
-	_add_sphere(head, 0.09, Vector3(0.31, 0.14, -0.45), eye_mat, "EyeR", Vector3(0.85, 0.72, 1.3))
-	_add_capsule(head, 0.06, 0.42, Vector3(-0.3, 0.23, -0.52), horn_mat, "BrowL", Vector3(82.0, 0.0, 12.0))
-	_add_capsule(head, 0.06, 0.42, Vector3(0.3, 0.23, -0.52), horn_mat, "BrowR", Vector3(82.0, 0.0, -12.0))
-
-	# Sweeping Curved Horns (lofted splines!)
-	for side_sign: float in [-1.0, 1.0]:
-		var horn_rings: Array = [
-			{"pos": Vector3(side_sign * 0.26, 0.24, 0.04), "rx": 0.11, "ry": 0.11},
-			{"pos": Vector3(side_sign * 0.42, 0.48, 0.56), "rx": 0.08, "ry": 0.08},
-			{"pos": Vector3(side_sign * 0.52, 0.68, 1.18), "rx": 0.05, "ry": 0.05},
-			{"pos": Vector3(side_sign * 0.5, 0.74, 1.65), "rx": 0.015, "ry": 0.015}
-		]
-		_add_lofted(head, horn_rings, horn_mat, "Horn_%s" % ("L" if side_sign < 0.0 else "R"), 10)
-
-	# Fire Breath Cone attached to head
-	var breath_cone: MeshInstance3D = _make_dragon_breath_cone(head, breath_col, Vector3(0.0, -0.06, -10.2))
-
-	# 4. Sinuous Articulated Tail + Spearhead Caudal Fin
-	var tail_1: Node3D = Node3D.new()
-	tail_1.name = "Tail1"
-	tail_1.position = Vector3(0.0, 1.38, 1.9)
-	body.add_child(tail_1)
-	var t1_rings: Array = [
-		{"pos": Vector3(0.0, 0.0, 0.0), "rx": 0.42, "ry": 0.36},
-		{"pos": Vector3(0.0, -0.06, 1.1), "rx": 0.3, "ry": 0.26},
-		{"pos": Vector3(0.0, -0.1, 2.2), "rx": 0.21, "ry": 0.18}
-	]
-	_add_lofted(tail_1, t1_rings, scale_mat, "TailSeg1", 12)
-
-	var tail_2: Node3D = Node3D.new()
-	tail_2.name = "Tail2"
-	tail_2.position = Vector3(0.0, -0.1, 2.15)
-	tail_1.add_child(tail_2)
-	var t2_rings: Array = [
-		{"pos": Vector3(0.0, 0.0, 0.0), "rx": 0.2, "ry": 0.17},
-		{"pos": Vector3(0.0, 0.02, 1.25), "rx": 0.12, "ry": 0.11},
-		{"pos": Vector3(0.0, 0.06, 2.45), "rx": 0.04, "ry": 0.04}
-	]
-	_add_lofted(tail_2, t2_rings, scale_mat, "TailSeg2", 10)
-	_add_prism(tail_2, Vector3(0.95, 1.15, 0.08), Vector3(0.0, 0.06, 2.65), horn_mat, "TailSpearFin", Vector3(90.0, 0.0, 0.0))
-
-	# 5. Muscular Dragon Legs with Curved Claws (Zero Boxes!)
-	for leg_def: Array in [
-		[Vector3(-0.78, 1.22, -0.95), -1.0],
-		[Vector3(0.78, 1.22, -0.95), 1.0],
-		[Vector3(-0.74, 1.22, 0.95), -1.0],
-		[Vector3(0.74, 1.22, 0.95), 1.0]
-	]:
-		var lp: Vector3 = leg_def[0] as Vector3
-		var leg_root: Node3D = Node3D.new()
-		leg_root.position = lp
-		body.add_child(leg_root)
-		_add_capsule(leg_root, 0.24, 0.85, Vector3(0.0, -0.28, 0.08), scale_mat, "Thigh", Vector3(22.0, 0.0, 0.0))
-		_add_capsule(leg_root, 0.16, 0.78, Vector3(0.0, -0.82, -0.06), scale_mat, "Shin", Vector3(-18.0, 0.0, 0.0))
-		# 3 curved talons per foot
-		for ci: int in range(-1, 2):
-			_add_prism(leg_root, Vector3(0.08, 0.34, 0.08), Vector3(float(ci) * 0.13, -1.16, -0.32), horn_mat, "Talon_%d" % ci, Vector3(-72.0, float(ci) * 16.0, 0.0))
-
-	# 6. Articulated Bat/Wyvern Wings with Visible Wing Bones & Translucent Backlit Membrane
-	var wing_l_root: Node3D = Node3D.new()
-	wing_l_root.name = "WingLRoot"
-	wing_l_root.position = Vector3(-0.75, 2.02, -0.45)
-	body.add_child(wing_l_root)
-	var wing_l_tip: Node3D = _build_wyvern_wing(wing_l_root, -1.0, scale_mat, horn_mat, wing_mat)
-
-	var wing_r_root: Node3D = Node3D.new()
-	wing_r_root.name = "WingRRoot"
-	wing_r_root.position = Vector3(0.75, 2.02, -0.45)
-	body.add_child(wing_r_root)
-	var wing_r_tip: Node3D = _build_wyvern_wing(wing_r_root, 1.0, scale_mat, horn_mat, wing_mat)
+	var cone_glb: MeshInstance3D = _make_dragon_breath_cone(body, breath_col, Vector3(0.0, 2.35, -11.8))
+	var aura_glb: MeshInstance3D = _make_dragon_grace_aura(body)
 
 	# Cosmetic Flight Trail
 	var trail: CPUParticles3D = CPUParticles3D.new()
 	trail.name = "CosmeticTrail"
-	trail.position = Vector3(0.0, 1.5, 2.6)
+	trail.position = Vector3(0.0, 1.8, 2.9)
 	var trail_def: Dictionary = GameConfig.COSMETIC_TRAILS.get(trail_id, GameConfig.COSMETIC_TRAILS["none"]) as Dictionary
 	var trail_color: Color = trail_def.get("color", Color(1, 1, 1, 0)) as Color
 	trail.emitting = trail_id != "none" and trail_color.a > 0.05
@@ -928,70 +676,16 @@ static func build_dragon_rig(root: Node3D, dragon_skin_id: String, trail_id: Str
 	trail.material_override = trail_mat
 	body.add_child(trail)
 
-	var grace_aura: MeshInstance3D = _make_dragon_grace_aura(body)
 	return {
 		"body": body,
-		"neck": neck,
-		"head": head,
-		"jaw": jaw,
-		"tail_1": tail_1,
-		"tail_2": tail_2,
-		"wing_l_root": wing_l_root,
-		"wing_l_tip": wing_l_tip,
-		"wing_r_root": wing_r_root,
-		"wing_r_tip": wing_r_tip,
-		"breath_cone": breath_cone,
+		"model_root": custom_dragon,
+		"head": custom_dragon,
+		"anim_player": dap,
+		"skeleton": dskel,
+		"breath_cone": cone_glb,
 		"trail": trail,
-		"grace_aura": grace_aura
+		"grace_aura": aura_glb
 	}
-
-
-static func _build_wyvern_wing(root: Node3D, s: float, bone_mat: Material, claw_mat: Material, mem_mat: Material) -> Node3D:
-	# Inner wing arm (Humerus + Radius)
-	var p_root: Vector3 = Vector3.ZERO
-	var p_elbow: Vector3 = Vector3(s * 2.55, 0.25, -0.45)
-	var p_attach: Vector3 = Vector3(s * 0.1, -0.35, 2.0)
-
-	_add_lofted(root, [
-		{"pos": p_root, "rx": 0.18, "ry": 0.16},
-		{"pos": p_elbow * 0.5 + Vector3(0.0, 0.08, 0.0), "rx": 0.14, "ry": 0.12},
-		{"pos": p_elbow, "rx": 0.13, "ry": 0.11}
-	], bone_mat, "Humerus", 10)
-
-	# Wing wrist claw
-	_add_prism(root, Vector3(0.14, 0.42, 0.14), p_elbow + Vector3(0.0, 0.12, -0.26), claw_mat, "WingClaw", Vector3(-68.0, 0.0, 0.0))
-
-	# Inner membrane connecting arm to dragon flank
-	var inner_mem: MeshInstance3D = MeshInstance3D.new()
-	inner_mem.name = "InnerMembrane"
-	inner_mem.mesh = _make_wing_membrane_mesh(p_root, p_elbow, [Vector3(s * 1.9, -0.1, 1.95)], p_attach)
-	inner_mem.material_override = mem_mat
-	root.add_child(inner_mem)
-
-	# Outer articulated wing hand (3 long bat phalanges + translucent scalloped membrane)
-	var tip_pivot: Node3D = Node3D.new()
-	tip_pivot.name = "WingTip"
-	tip_pivot.position = p_elbow
-	root.add_child(tip_pivot)
-
-	var f1: Vector3 = Vector3(s * 3.7, 0.15, -0.25)
-	var f2: Vector3 = Vector3(s * 3.15, -0.1, 1.35)
-	var f3: Vector3 = Vector3(s * 1.65, -0.22, 2.45)
-	var f4: Vector3 = Vector3(-s * 0.65, -0.35, 2.35)
-
-	for finger_end: Vector3 in [f1, f2, f3]:
-		_add_lofted(tip_pivot, [
-			{"pos": Vector3.ZERO, "rx": 0.09, "ry": 0.08},
-			{"pos": finger_end * 0.55, "rx": 0.055, "ry": 0.05},
-			{"pos": finger_end, "rx": 0.02, "ry": 0.02}
-		], bone_mat, "Phalanx", 8)
-
-	var outer_mem: MeshInstance3D = MeshInstance3D.new()
-	outer_mem.name = "OuterMembrane"
-	outer_mem.mesh = _make_wing_membrane_mesh(Vector3.ZERO, Vector3.ZERO, [f1, f2, f3], f4)
-	outer_mem.material_override = mem_mat
-	tip_pivot.add_child(outer_mem)
-	return tip_pivot
 
 
 static func _make_dragon_breath_cone(parent: Node3D, breath_col: Color, pos: Vector3) -> MeshInstance3D:
@@ -1032,7 +726,7 @@ static func _make_dragon_grace_aura(parent: Node3D) -> MeshInstance3D:
 	return grace_aura
 
 
-# --- Colossal Sculpted World Bosses ---
+# --- Colossal .glb World Bosses & Dungeon Bosses (Zero Procedural Titans) ---
 
 static func build_world_boss_rig(root: Node3D, style: String) -> Dictionary:
 	for child: Node in root.get_children():
@@ -1044,78 +738,71 @@ static func build_world_boss_rig(root: Node3D, style: String) -> Dictionary:
 
 	if style == "wyrm":
 		var drig: Dictionary = build_dragon_rig(body, "abyssal_black", "ember_sparks")
-		body.scale = Vector3.ONE * 1.85
-		return {"body": body, "dragon_rig": drig}
+		body.scale = Vector3.ONE * 1.95
+		return {
+			"body": body,
+			"dragon_rig": drig,
+			"anim_player": drig.get("anim_player", null),
+			"is_wyrm": true
+		}
 
 	var is_order: bool = (style == "seraphim")
-	var armor_mat: StandardMaterial3D = make_pbr_material(
-		Color(0.92, 0.8, 0.36) if is_order else Color(0.14, 0.1, 0.16),
-		0.25 if is_order else 0.38,
-		0.88 if is_order else 0.65
+	var boss_glb: Node3D = _instantiate_glb(
+		GLB_KNIGHT if is_order else GLB_CLERIC,
+		GLB_PATH_KNIGHT if is_order else GLB_PATH_CLERIC
 	)
-	var glow_col: Color = Color(1.0, 0.92, 0.42) if is_order else Color(1.0, 0.28, 0.08)
-	var glow_mat: StandardMaterial3D = make_pbr_material(glow_col, 0.15, 0.1, glow_col, 3.0)
-
-	# Towering sculpted titan torso
-	var titan_rings: Array = [
-		{"pos": Vector3(0.0, 1.8, 0.0), "rx": 0.85, "ry": 0.65},
-		{"pos": Vector3(0.0, 3.0, 0.05), "rx": 1.35, "ry": 0.95},
-		{"pos": Vector3(0.0, 4.1, 0.0), "rx": 1.1, "ry": 0.75}
-	]
-	_add_lofted(body, titan_rings, armor_mat, "TitanTorso", 16)
-	_add_sphere(body, 0.55, Vector3(0.0, 3.1, 0.88), glow_mat, "TitanCore", Vector3(1.1, 1.3, 0.4))
-	_add_sphere(body, 0.62, Vector3(0.0, 4.75, 0.0), armor_mat, "TitanHead")
-	_add_torus(body, 0.72, 0.86, Vector3(0.0, 5.4, 0.0), glow_mat, "BossCrown")
-	_add_capsule(body, 0.42, 1.9, Vector3(-0.7, 0.95, 0.0), armor_mat, "LegL")
-	_add_capsule(body, 0.42, 1.9, Vector3(0.7, 0.95, 0.0), armor_mat, "LegR")
-
-	var arm_r: Node3D = Node3D.new()
-	arm_r.name = "BossArmR"
-	arm_r.position = Vector3(1.55, 3.6, 0.0)
-	body.add_child(arm_r)
-	_add_sphere(arm_r, 0.65, Vector3.ZERO, glow_mat if is_order else armor_mat, "PauldronR")
-	_add_capsule(arm_r, 0.36, 1.9, Vector3(0.0, -0.95, 0.0), armor_mat, "ArmCapR")
-	_add_prism(arm_r, Vector3(0.42, 3.6, 0.22), Vector3(0.0, -1.8, 1.4), glow_mat, "ColossalWeapon", Vector3(85.0, 0.0, 0.0))
-
-	var arm_l: Node3D = Node3D.new()
-	arm_l.name = "BossArmL"
-	arm_l.position = Vector3(-1.55, 3.6, 0.0)
-	body.add_child(arm_l)
-	_add_sphere(arm_l, 0.65, Vector3.ZERO, glow_mat if is_order else armor_mat, "PauldronL")
-	_add_capsule(arm_l, 0.36, 1.9, Vector3(0.0, -0.95, 0.0), armor_mat, "ArmCapL")
+	boss_glb.name = "BossGLB"
+	boss_glb.scale = Vector3.ONE * 2.75
+	body.add_child(boss_glb)
 
 	if is_order:
-		# Sweeping radiant wings for Seraphim Colossus
-		for s: float in [-1.0, 1.0]:
-			_add_prism(body, Vector3(2.8, 4.2, 0.14), Vector3(s * 2.1, 3.9, -0.7), glow_mat, "SeraphWing_%d" % int(s), Vector3(15.0, 0.0, s * -28.0))
+		_set_nodes_visible(boss_glb, ["1H_Sword", "1H_Sword_Offhand", "Badge_Shield", "Rectangle_Shield", "Round_Shield"], false)
+		_set_nodes_visible(boss_glb, ["2H_Sword", "Spike_Shield", "Knight_Helmet"], true)
+		_tint_glb_materials(boss_glb, Color(0.98, 0.85, 0.36), 0.58, 0.45, Color(1.0, 0.84, 0.32), 0.45)
 	else:
-		# Jagged obsidian horns for Chaos Behemoth
-		for s: float in [-1.0, 1.0]:
-			_add_prism(body, Vector3(0.35, 1.5, 0.35), Vector3(s * 0.7, 5.4, 0.0), glow_mat, "ChaosHorn_%d" % int(s), Vector3(-15.0, 0.0, s * -32.0))
+		_set_nodes_visible(boss_glb, ["1H_Axe", "1H_Axe_Offhand", "Barbarian_Round_Shield", "Mug"], false)
+		_set_nodes_visible(boss_glb, ["2H_Axe", "Barbarian_Hat"], true)
+		_tint_glb_materials(boss_glb, Color(0.18, 0.08, 0.14), 0.65, 0.35, Color(1.0, 0.24, 0.08), 0.65)
 
-	return {"body": body, "arm_r": arm_r, "arm_l": arm_l}
+	var glow_col: Color = Color(1.0, 0.9, 0.38) if is_order else Color(1.0, 0.26, 0.08)
+	var glow_mat: StandardMaterial3D = make_pbr_material(glow_col, 0.15, 0.2, glow_col, 2.8)
+	_add_torus(body, 0.9, 1.08, Vector3(0.0, 6.2, 0.0), glow_mat, "BossCrown")
+
+	var bap: AnimationPlayer = _find_child_of_type(boss_glb, "AnimationPlayer") as AnimationPlayer
+	if bap != null and bap.has_animation("Idle"):
+		var ia: Animation = bap.get_animation("Idle")
+		if ia != null:
+			ia.loop_mode = Animation.LOOP_LINEAR
+		bap.play("Idle")
+
+	return {
+		"body": body,
+		"model_root": boss_glb,
+		"anim_player": bap,
+		"is_wyrm": false
+	}
 
 
-# --- Sculpted Medieval Stations (Blacksmith Forge, Alchemy Bench, Shop Stall) ---
+# --- 1K PBR Medieval Stations (Blacksmith Forge, Alchemy Bench, Campfire, Market Stall) ---
 
 static func build_station_visual(root: Node3D, station_type: String) -> void:
 	for child: Node in root.get_children():
 		child.queue_free()
-	var stone_mat: StandardMaterial3D = make_pbr_material(Color(0.44, 0.44, 0.48), 0.85, 0.05)
-	var wood_mat: StandardMaterial3D = make_pbr_material(Color(0.4, 0.25, 0.14), 0.78, 0.0)
-	var iron_mat: StandardMaterial3D = make_pbr_material(Color(0.24, 0.26, 0.3), 0.35, 0.85)
+	var stone_mat: StandardMaterial3D = make_stone_pbr_material(Color(0.88, 0.88, 0.9))
+	var rock_mat: StandardMaterial3D = make_rock_pbr_material(Color(0.68, 0.68, 0.72))
+	var wood_mat: StandardMaterial3D = make_wood_pbr_material(Color(0.58, 0.38, 0.22))
+	var iron_mat: StandardMaterial3D = make_pbr_material(Color(0.24, 0.26, 0.3), 0.32, 0.88)
 	var fire_mat: StandardMaterial3D = make_pbr_material(Color(1.0, 0.46, 0.12), 0.2, 0.0, Color(1.0, 0.42, 0.08), 3.0)
 
 	if station_type == "forge":
-		_add_cylinder(root, 1.35, 1.55, 1.2, Vector3(-0.8, 0.6, -0.4), make_stone_pbr_material(), "ForgeHearth", 10)
-		_add_cylinder(root, 0.65, 1.05, 1.9, Vector3(-0.8, 2.1, -0.5), make_stone_pbr_material(), "Chimney", 8)
+		_add_cylinder(root, 1.35, 1.55, 1.2, Vector3(-0.8, 0.6, -0.4), stone_mat, "ForgeHearth", 10)
+		_add_cylinder(root, 0.65, 1.05, 1.9, Vector3(-0.8, 2.1, -0.5), stone_mat, "Chimney", 8)
 		_add_sphere(root, 0.72, Vector3(-0.8, 1.28, -0.25), fire_mat, "Embers", Vector3(1.1, 0.45, 1.0))
 		_add_cylinder(root, 0.42, 0.5, 0.55, Vector3(1.0, 0.28, 0.4), wood_mat, "AnvilStump", 12)
 		_add_cylinder(root, 0.24, 0.34, 0.35, Vector3(1.0, 0.72, 0.4), iron_mat, "AnvilWaist", 10)
-		_add_capsule(root, 0.2, 0.95, Vector3(1.0, 0.98, 0.4), iron_mat, "AnvilHorn", Vector3(0.0, 0.0, 90.0))
+		_add_prism(root, Vector3(0.92, 0.36, 0.42), Vector3(1.0, 1.02, 0.4), iron_mat, "AnvilHorn", Vector3(0.0, 0.0, 180.0))
 	elif station_type == "campfire":
-		# Stone-ringed cooking campfire with suspended stew pot
-		_add_torus(root, 0.75, 1.05, Vector3(0.0, 0.14, 0.0), stone_mat, "FireRing")
+		_add_torus(root, 0.75, 1.05, Vector3(0.0, 0.14, 0.0), rock_mat, "FireRing")
 		_add_sphere(root, 0.48, Vector3(0.0, 0.36, 0.0), fire_mat, "CampFlames", Vector3(1.0, 1.35, 1.0))
 		_add_cylinder(root, 0.06, 0.07, 1.9, Vector3(-0.85, 0.9, 0.0), wood_mat, "TripodL", 8, Vector3(0.0, 0.0, -18.0))
 		_add_cylinder(root, 0.06, 0.07, 1.9, Vector3(0.85, 0.9, 0.0), wood_mat, "TripodR", 8, Vector3(0.0, 0.0, 18.0))
@@ -1124,14 +811,14 @@ static func build_station_visual(root: Node3D, station_type: String) -> void:
 		var emerald_mat: StandardMaterial3D = make_pbr_material(Color(0.24, 0.95, 0.55), 0.12, 0.1, Color(0.2, 0.9, 0.48), 2.5)
 		var arcane_mat: StandardMaterial3D = make_pbr_material(Color(0.45, 0.68, 1.0), 0.12, 0.1, Color(0.38, 0.62, 1.0), 2.5)
 		_add_cylinder(root, 1.25, 1.15, 0.16, Vector3(0.0, 0.95, 0.0), wood_mat, "AlchemyTableTop", 12)
-		_add_cylinder(root, 0.22, 0.36, 0.92, Vector3(0.0, 0.46, 0.0), wood_mat, "TablePedestal", 10)
+		_add_cylinder(root, 0.22, 0.36, 0.92, Vector3(0.0, 0.46, 0.0), stone_mat, "TablePedestal", 10)
 		_add_sphere(root, 0.22, Vector3(-0.45, 1.22, 0.15), emerald_mat, "FlaskGreen")
 		_add_sphere(root, 0.18, Vector3(0.42, 1.18, -0.2), arcane_mat, "FlaskBlue")
 		_add_torus(root, 0.32, 0.38, Vector3(0.0, 1.45, 0.0), arcane_mat, "AlchemyRing")
 	else:
 		var canopy_mat: StandardMaterial3D = make_pbr_material(Color(0.74, 0.2, 0.16), 0.72, 0.0)
 		canopy_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_add_cylinder(root, 2.2, 2.35, 0.22, Vector3(0.0, 0.11, 0.0), make_stone_pbr_material(), "StallDeck", 12)
+		_add_cylinder(root, 2.2, 2.35, 0.22, Vector3(0.0, 0.11, 0.0), stone_mat, "StallDeck", 12)
 		for p: Vector3 in [Vector3(-1.6, 1.6, -1.0), Vector3(1.6, 1.6, -1.0), Vector3(-1.6, 1.6, 1.0), Vector3(1.6, 1.6, 1.0)]:
 			_add_cylinder(root, 0.1, 0.12, 3.1, p, wood_mat, "Post", 8)
 		_add_cylinder(root, 0.1, 2.6, 1.1, Vector3(0.0, 3.55, 0.0), canopy_mat, "PavilionCanopy", 8)
@@ -1140,13 +827,13 @@ static func build_station_visual(root: Node3D, station_type: String) -> void:
 		_add_sphere(root, 0.22, Vector3(0.0, 2.65, 1.05), fire_mat, "ShopLantern")
 
 
-# --- Sculpted Dungeon Entrance Portal ---
+# --- 1K PBR Dungeon Entrance Portal ---
 
 static func build_dungeon_portal_visual(root: Node3D, theme: String) -> Node3D:
 	for child: Node in root.get_children():
 		child.queue_free()
 	var is_order: bool = (theme == "order")
-	var stone_mat: StandardMaterial3D = make_stone_pbr_material(Color(0.72, 0.75, 0.82))
+	var stone_mat: StandardMaterial3D = make_stone_pbr_material(Color(0.76, 0.78, 0.86) if is_order else Color(0.45, 0.38, 0.42))
 	var portal_col: Color = Color(0.35, 0.82, 1.0) if is_order else Color(1.0, 0.26, 0.12)
 	var portal_mat: StandardMaterial3D = make_pbr_material(portal_col, 0.1, 0.1, portal_col, 3.0)
 	portal_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -1166,7 +853,7 @@ static func build_dungeon_portal_visual(root: Node3D, theme: String) -> Node3D:
 	return vortex
 
 
-# --- Player Buildings (Walls, Gates, Towers, Houses, Storage Chests, Altars, Trade Posts) ---
+# --- 1K PBR Player Buildings (Walls, Gates, Towers, Houses, Chests, Altars, Trade Posts) ---
 
 static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: bool = false, valid_ghost: bool = true) -> Dictionary:
 	for child: Node in root.get_children():
@@ -1175,8 +862,8 @@ static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: b
 	var spec: Dictionary = GameConfig.BUILD_PIECES.get(piece_type, GameConfig.BUILD_PIECES["wall"]) as Dictionary
 	var base_col: Color = spec.get("color", Color(0.55, 0.55, 0.58)) as Color
 	var stone_mat: StandardMaterial3D = make_stone_pbr_material(base_col.lightened(0.35))
-	var wood_mat: StandardMaterial3D = make_pbr_material(Color(0.42, 0.28, 0.16), 0.8, 0.0)
-	var trim_mat: StandardMaterial3D = make_pbr_material(Color(0.32, 0.34, 0.38), 0.6, 0.4)
+	var wood_mat: StandardMaterial3D = make_wood_pbr_material(Color(0.62, 0.42, 0.25))
+	var trim_mat: StandardMaterial3D = make_rock_pbr_material(Color(0.52, 0.54, 0.58))
 
 	if is_ghost:
 		var gcol: Color = Color(0.25, 0.9, 0.45, 0.48) if valid_ghost else Color(0.95, 0.22, 0.22, 0.48)
@@ -1217,7 +904,7 @@ static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: b
 	elif piece_type == "tower":
 		_add_cylinder(root, 2.15, 2.55, 8.2, Vector3(0.0, 4.1, 0.0), stone_mat, "RoundTower", 14)
 		_add_cylinder(root, 2.65, 2.35, 0.8, Vector3(0.0, 8.4, 0.0), trim_mat, "TowerParapet", 14)
-		var roof_mat: StandardMaterial3D = make_pbr_material(Color(0.24, 0.28, 0.42), 0.65, 0.1) if not is_ghost else stone_mat
+		var roof_mat: StandardMaterial3D = make_rock_pbr_material(Color(0.36, 0.42, 0.58)) if not is_ghost else stone_mat
 		_add_cylinder(root, 0.1, 2.85, 2.8, Vector3(0.0, 10.2, 0.0), roof_mat, "ConicalRoof", 14)
 		var beacon_mat: StandardMaterial3D = make_pbr_material(Color(1.0, 0.72, 0.22), 0.2, 0.0, Color(1.0, 0.6, 0.12), 2.5) if not is_ghost else stone_mat
 		_add_sphere(root, 0.42, Vector3(0.0, 11.75, 0.0), beacon_mat, "WatchBeacon")
@@ -1240,21 +927,165 @@ static func build_structure_visual(root: Node3D, piece_type: String, is_ghost: b
 	return {"door_pivot": door_pivot, "sigil_node": sigil_node}
 
 
-# --- Sculpted Gatherable Resource Nodes ---
+# --- Cached 1K PBR Organic Trees & Boulders (Acyclic Shared Meshes for TerrainChunk & Resources) ---
+
+static var _cached_pine_mesh: ArrayMesh = null
+static var _cached_oak_mesh: ArrayMesh = null
+static var _cached_rock_mesh: ArrayMesh = null
+
+
+static func _append_uv_cone(st: SurfaceTool, base_y: float, top_y: float, base_r: float, top_r: float, segs: int, jitter: float = 0.0) -> void:
+	for i: int in range(segs):
+		var u0: float = float(i) / float(segs)
+		var u1: float = float(i + 1) / float(segs)
+		var a0: float = u0 * TAU
+		var a1: float = u1 * TAU
+		var r0: float = base_r * (1.0 + sin(a0 * 3.0 + base_y) * jitter)
+		var r1: float = base_r * (1.0 + sin(a1 * 3.0 + base_y) * jitter)
+		var b0: Vector3 = Vector3(cos(a0) * r0, base_y, sin(a0) * r0)
+		var b1: Vector3 = Vector3(cos(a1) * r1, base_y, sin(a1) * r1)
+		var t0: Vector3 = Vector3(cos(a0) * top_r, top_y, sin(a0) * top_r)
+		var t1: Vector3 = Vector3(cos(a1) * top_r, top_y, sin(a1) * top_r)
+		st.set_uv(Vector2(u0 * 2.0, 0.0))
+		st.add_vertex(b0)
+		st.set_uv(Vector2(u1 * 2.0, 1.0))
+		st.add_vertex(t1)
+		st.set_uv(Vector2(u0 * 2.0, 1.0))
+		st.add_vertex(t0)
+		st.set_uv(Vector2(u0 * 2.0, 0.0))
+		st.add_vertex(b0)
+		st.set_uv(Vector2(u1 * 2.0, 0.0))
+		st.add_vertex(b1)
+		st.set_uv(Vector2(u1 * 2.0, 1.0))
+		st.add_vertex(t1)
+
+
+static func _append_uv_displaced_sphere(st: SurfaceTool, center: Vector3, radius: float, segs: int, rings: int, jitter: float) -> void:
+	var grid: Array[Vector3] = []
+	var uvs: Array[Vector2] = []
+	for r: int in range(rings + 1):
+		var v: float = float(r) / float(rings)
+		var phi: float = v * PI
+		for s: int in range(segs + 1):
+			var u: float = float(s) / float(segs)
+			var theta: float = u * TAU
+			var dir: Vector3 = Vector3(sin(phi) * cos(theta), cos(phi), sin(phi) * sin(theta))
+			var disp: float = 1.0 + sin(dir.x * 5.2 + dir.y * 4.1) * cos(dir.z * 5.7) * jitter
+			grid.append(center + dir * radius * disp)
+			uvs.append(Vector2(u * 2.0, v * 2.0))
+	var stride: int = segs + 1
+	for r: int in range(rings):
+		for s: int in range(segs):
+			var i00: int = r * stride + s
+			var i10: int = i00 + 1
+			var i01: int = i00 + stride
+			var i11: int = i01 + 1
+			st.set_uv(uvs[i00])
+			st.add_vertex(grid[i00])
+			st.set_uv(uvs[i10])
+			st.add_vertex(grid[i10])
+			st.set_uv(uvs[i11])
+			st.add_vertex(grid[i11])
+			st.set_uv(uvs[i00])
+			st.add_vertex(grid[i00])
+			st.set_uv(uvs[i11])
+			st.add_vertex(grid[i11])
+			st.set_uv(uvs[i01])
+			st.add_vertex(grid[i01])
+
+
+static func get_shared_pine_mesh() -> ArrayMesh:
+	if _cached_pine_mesh != null:
+		return _cached_pine_mesh
+	var out: ArrayMesh = ArrayMesh.new()
+	var st_bark: SurfaceTool = SurfaceTool.new()
+	st_bark.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st_bark.set_smooth_group(0)
+	_append_uv_cone(st_bark, 0.0, 3.0, 0.4, 0.14, 8, 0.08)
+	st_bark.index()
+	st_bark.generate_normals()
+	st_bark.set_material(make_wood_pbr_material(Color(0.46, 0.32, 0.22), 0.7))
+	st_bark.commit(out)
+
+	var st_leaf: SurfaceTool = SurfaceTool.new()
+	st_leaf.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st_leaf.set_smooth_group(0)
+	_append_uv_cone(st_leaf, 1.8, 4.5, 2.25, 0.28, 9, 0.16)
+	_append_uv_cone(st_leaf, 3.4, 6.1, 1.75, 0.2, 9, 0.16)
+	_append_uv_cone(st_leaf, 4.9, 7.6, 1.2, 0.03, 8, 0.14)
+	st_leaf.index()
+	st_leaf.generate_normals()
+	st_leaf.set_material(make_foliage_pbr_material(Color(0.32, 0.56, 0.34), 0.65))
+	st_leaf.commit(out)
+	_cached_pine_mesh = out
+	return _cached_pine_mesh
+
+
+static func get_shared_oak_mesh() -> ArrayMesh:
+	if _cached_oak_mesh != null:
+		return _cached_oak_mesh
+	var out: ArrayMesh = ArrayMesh.new()
+	var st_bark: SurfaceTool = SurfaceTool.new()
+	st_bark.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st_bark.set_smooth_group(0)
+	_append_uv_cone(st_bark, 0.0, 3.4, 0.48, 0.24, 9, 0.1)
+	st_bark.index()
+	st_bark.generate_normals()
+	st_bark.set_material(make_wood_pbr_material(Color(0.5, 0.35, 0.24), 0.65))
+	st_bark.commit(out)
+
+	var st_leaf: SurfaceTool = SurfaceTool.new()
+	st_leaf.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st_leaf.set_smooth_group(0)
+	var crown_blobs: Array = [
+		[Vector3(0.0, 4.4, 0.0), 2.2],
+		[Vector3(1.25, 3.85, 0.72), 1.55],
+		[Vector3(-1.15, 4.05, -0.62), 1.65],
+		[Vector3(0.22, 5.45, -0.32), 1.45]
+	]
+	for blob_var: Variant in crown_blobs:
+		var blob: Array = blob_var as Array
+		_append_uv_displaced_sphere(st_leaf, blob[0] as Vector3, float(blob[1]), 8, 6, 0.22)
+	st_leaf.index()
+	st_leaf.generate_normals()
+	st_leaf.set_material(make_foliage_pbr_material(Color(0.45, 0.7, 0.38), 0.55))
+	st_leaf.commit(out)
+	_cached_oak_mesh = out
+	return _cached_oak_mesh
+
+
+static func get_shared_rock_mesh() -> ArrayMesh:
+	if _cached_rock_mesh != null:
+		return _cached_rock_mesh
+	var st: SurfaceTool = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	st.set_smooth_group(0)
+	_append_uv_displaced_sphere(st, Vector3(0.0, 0.45, 0.0), 0.95, 10, 7, 0.28)
+	st.index()
+	st.generate_normals()
+	st.set_material(make_rock_pbr_material(Color(0.84, 0.84, 0.88), 0.55))
+	_cached_rock_mesh = st.commit()
+	return _cached_rock_mesh
+
+
+# --- 1K PBR Gatherable Resource Nodes (Organic Textured Trees & Rocky Veins) ---
 
 static func build_resource_visual(root: Node3D, resource_type: String) -> void:
 	for child: Node in root.get_children():
 		child.queue_free()
 
 	if resource_type == "wood":
-		var bark_mat: StandardMaterial3D = make_pbr_material(Color(0.32, 0.21, 0.13), 0.9, 0.0)
-		var leaf_mat: StandardMaterial3D = make_pbr_material(Color(0.16, 0.38, 0.16), 0.82, 0.0)
-		_add_cylinder(root, 0.22, 0.42, 3.1, Vector3(0.0, 1.55, 0.0), bark_mat, "Trunk", 9)
-		_add_sphere(root, 1.55, Vector3(0.0, 3.6, 0.0), leaf_mat, "Crown1", Vector3(1.1, 0.85, 1.1), 10)
-		_add_sphere(root, 1.15, Vector3(0.85, 3.2, 0.4), leaf_mat, "Crown2", Vector3(1.0, 0.85, 1.0), 10)
-		_add_sphere(root, 1.05, Vector3(-0.7, 4.4, -0.3), leaf_mat, "Crown3", Vector3(1.0, 0.85, 1.0), 10)
+		var tree_mi: MeshInstance3D = MeshInstance3D.new()
+		tree_mi.name = "OakResourceTree"
+		tree_mi.mesh = get_shared_oak_mesh()
+		tree_mi.scale = Vector3.ONE * 0.85
+		root.add_child(tree_mi)
 	elif resource_type == "iron_ore" or resource_type == "silver_ore" or resource_type == "gold_ore":
-		var rock_mat: StandardMaterial3D = make_pbr_material(Color(0.34, 0.35, 0.38), 0.82, 0.25)
+		var rock_mi: MeshInstance3D = MeshInstance3D.new()
+		rock_mi.name = "OreBoulder"
+		rock_mi.mesh = get_shared_rock_mesh()
+		rock_mi.scale = Vector3(1.25, 0.9, 1.15)
+		root.add_child(rock_mi)
 		var vein_col: Color = Color(0.68, 0.72, 0.78)
 		var emit_e: float = 0.0
 		if resource_type == "silver_ore":
@@ -1264,31 +1095,41 @@ static func build_resource_visual(root: Node3D, resource_type: String) -> void:
 			vein_col = Color(1.0, 0.82, 0.26)
 			emit_e = 1.4
 		var ore_mat: StandardMaterial3D = make_pbr_material(vein_col, 0.22, 0.92, vein_col, emit_e)
-		_add_sphere(root, 1.05, Vector3(0.0, 0.65, 0.0), rock_mat, "OreRock", Vector3(1.25, 0.85, 1.1), 10)
-		_add_prism(root, Vector3(0.45, 0.85, 0.45), Vector3(0.35, 1.0, 0.2), ore_mat, "Vein1", Vector3(16.0, 25.0, -18.0))
-		_add_prism(root, Vector3(0.38, 0.72, 0.38), Vector3(-0.42, 0.9, -0.18), ore_mat, "Vein2", Vector3(-18.0, -30.0, 22.0))
+		_add_prism(root, Vector3(0.45, 0.85, 0.45), Vector3(0.35, 0.95, 0.2), ore_mat, "Vein1", Vector3(16.0, 25.0, -18.0))
+		_add_prism(root, Vector3(0.38, 0.72, 0.38), Vector3(-0.42, 0.85, -0.18), ore_mat, "Vein2", Vector3(-18.0, -30.0, 22.0))
 	elif resource_type == "raw_meat":
-		var crate_mat: StandardMaterial3D = make_pbr_material(Color(0.58, 0.22, 0.18), 0.72, 0.05)
+		var crate_mat: StandardMaterial3D = make_wood_pbr_material(Color(0.64, 0.32, 0.24))
 		var bone_mat: StandardMaterial3D = make_pbr_material(Color(0.92, 0.88, 0.78), 0.65, 0.0)
 		_add_sphere(root, 0.62, Vector3(0.0, 0.55, 0.0), crate_mat, "GameRoast", Vector3(1.3, 0.75, 0.95), 10)
 		_add_cylinder(root, 0.12, 0.12, 1.25, Vector3(0.0, 0.55, 0.0), bone_mat, "Bone", 8, Vector3(0.0, 0.0, 90.0))
 	elif resource_type == "alchemy_herb":
-		var stem_mat: StandardMaterial3D = make_pbr_material(Color(0.16, 0.48, 0.22), 0.75, 0.0)
+		var stem_mat: StandardMaterial3D = make_foliage_pbr_material(Color(0.24, 0.62, 0.32))
 		var bloom_mat: StandardMaterial3D = make_pbr_material(Color(0.35, 1.0, 0.68), 0.2, 0.0, Color(0.28, 0.95, 0.62), 2.4)
 		for i: int in range(5):
 			var ang: float = (float(i) / 5.0) * TAU
 			var sx: float = cos(ang) * 0.42
 			var sz: float = sin(ang) * 0.42
-			_add_capsule(root, 0.07, 0.85, Vector3(sx, 0.42, sz), stem_mat, "Stem_%d" % i, Vector3(sin(ang) * 18.0, 0.0, -cos(ang) * 18.0))
+			_add_cylinder(root, 0.03, 0.06, 0.85, Vector3(sx, 0.42, sz), stem_mat, "Stem_%d" % i, 6, Vector3(sin(ang) * 18.0, 0.0, -cos(ang) * 18.0))
 			_add_sphere(root, 0.16, Vector3(sx * 1.25, 0.88, sz * 1.25), bloom_mat, "Bloom_%d" % i)
 	elif resource_type == "stone":
-		var rock_mat: StandardMaterial3D = make_stone_pbr_material(Color(0.82, 0.82, 0.85))
-		_add_sphere(root, 1.05, Vector3(0.0, 0.65, 0.0), rock_mat, "Boulder1", Vector3(1.25, 0.85, 1.15), 10)
-		_add_sphere(root, 0.72, Vector3(0.85, 0.45, 0.45), rock_mat, "Boulder2", Vector3(1.15, 0.8, 1.0), 10)
+		var b1: MeshInstance3D = MeshInstance3D.new()
+		b1.name = "Boulder1"
+		b1.mesh = get_shared_rock_mesh()
+		b1.scale = Vector3(1.35, 0.95, 1.2)
+		root.add_child(b1)
+		var b2: MeshInstance3D = MeshInstance3D.new()
+		b2.name = "Boulder2"
+		b2.mesh = get_shared_rock_mesh()
+		b2.position = Vector3(0.85, -0.05, 0.45)
+		b2.scale = Vector3(0.85, 0.7, 0.85)
+		root.add_child(b2)
 	else:
-		var rock_mat: StandardMaterial3D = make_pbr_material(Color(0.22, 0.22, 0.28), 0.8, 0.15)
+		var rock_mi: MeshInstance3D = MeshInstance3D.new()
+		rock_mi.name = "OreBase"
+		rock_mi.mesh = get_shared_rock_mesh()
+		rock_mi.scale = Vector3(1.15, 0.72, 1.15)
+		root.add_child(rock_mi)
 		var crystal_mat: StandardMaterial3D = make_pbr_material(Color(0.32, 0.78, 1.0), 0.12, 0.3, Color(0.24, 0.68, 1.0), 2.8)
-		_add_sphere(root, 0.9, Vector3(0.0, 0.45, 0.0), rock_mat, "OreBase", Vector3(1.2, 0.65, 1.2), 10)
 		_add_cylinder(root, 0.03, 0.28, 2.0, Vector3(0.0, 1.15, 0.0), crystal_mat, "Crystal1", 6, Vector3(8.0, 0.0, -10.0))
 		_add_cylinder(root, 0.02, 0.2, 1.45, Vector3(0.45, 0.88, 0.25), crystal_mat, "Crystal2", 6, Vector3(-14.0, 15.0, 22.0))
 		_add_cylinder(root, 0.02, 0.2, 1.35, Vector3(-0.42, 0.82, -0.2), crystal_mat, "Crystal3", 6, Vector3(18.0, -20.0, -20.0))
@@ -1297,11 +1138,12 @@ static func build_resource_visual(root: Node3D, resource_type: String) -> void:
 static func build_loot_chest_visual(root: Node3D) -> void:
 	for child: Node in root.get_children():
 		child.queue_free()
-	var wood_mat: StandardMaterial3D = make_pbr_material(Color(0.38, 0.22, 0.12), 0.72, 0.08)
+	var wood_mat: StandardMaterial3D = make_wood_pbr_material(Color(0.55, 0.34, 0.18))
 	var gold_mat: StandardMaterial3D = make_pbr_material(Color(0.95, 0.78, 0.24), 0.24, 0.88, Color(0.95, 0.75, 0.2), 0.9)
-	_add_capsule(root, 0.38, 1.05, Vector3(0.0, 0.4, 0.0), wood_mat, "VaultedChest", Vector3(0.0, 0.0, 90.0))
-	_add_torus(root, 0.36, 0.42, Vector3(-0.26, 0.4, 0.0), gold_mat, "GoldBandL", Vector3(0.0, 0.0, 90.0))
-	_add_torus(root, 0.36, 0.42, Vector3(0.26, 0.4, 0.0), gold_mat, "GoldBandR", Vector3(0.0, 0.0, 90.0))
+	_add_box(root, Vector3(1.15, 0.56, 0.72), Vector3(0.0, 0.28, 0.0), wood_mat, "ChestBase")
+	_add_cylinder(root, 0.36, 0.36, 1.15, Vector3(0.0, 0.56, 0.0), wood_mat, "ChestLid", 10, Vector3(0.0, 0.0, 90.0))
+	_add_torus(root, 0.35, 0.4, Vector3(-0.32, 0.56, 0.0), gold_mat, "GoldBandL", Vector3(0.0, 0.0, 90.0))
+	_add_torus(root, 0.35, 0.4, Vector3(0.32, 0.56, 0.0), gold_mat, "GoldBandR", Vector3(0.0, 0.0, 90.0))
 	var beam_mat: StandardMaterial3D = make_pbr_material(Color(1.0, 0.82, 0.32, 0.35), 0.2, 0.0, Color(1.0, 0.8, 0.25), 1.8)
 	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_add_cylinder(root, 0.12, 0.22, 3.8, Vector3(0.0, 2.2, 0.0), beam_mat, "LootBeacon", 10)

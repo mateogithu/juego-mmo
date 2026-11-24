@@ -34,7 +34,7 @@ static func record_structure_destroyed(world_pos: Vector3, piece_type: String, a
 	var pts: int = int(spec.get("territory_pts", 12))
 	entry["order"] = maxi(0, int(entry.get("order", 0)) - pts)
 	if attacker_faction == GameConfig.PHILOSOPHY_CHAOS or piece_type != "altar_chaos":
-		entry["chaos"] = int(entry.get("chaos", 0)) + int(pts * 1.4)
+		entry["chaos"] = int(entry.get("chaos", 0)) + int(roundf(float(pts) * 1.4))
 	_recompute_region_owner(entry)
 	DatabaseManager.mark_dirty()
 

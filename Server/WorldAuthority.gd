@@ -276,7 +276,7 @@ func _rpc_update_roster(names: PackedStringArray) -> void:
 
 
 func _build_initial_server_state(peer_id: int, profile: Dictionary, pos: Vector3) -> Dictionary:
-	var cos: Dictionary = profile.get("cosmetics", {}) as Dictionary
+	var cosmetics_data: Dictionary = profile.get("cosmetics", {}) as Dictionary
 	var uname: String = str(profile.get("username", "Viajero"))
 	var has_grace: bool = _grace_scheduler != null and _grace_scheduler.is_player_blessed(uname)
 	return {
@@ -286,10 +286,11 @@ func _build_initial_server_state(peer_id: int, profile: Dictionary, pos: Vector3
 		"level": int(profile.get("level", 1)),
 		"class_id": str(profile.get("class_id", "ARCANE_KNIGHT")),
 		"race_id": str(profile.get("race_id", "HUMAN_VALLEY")),
+		"appearance": (profile.get("appearance", {}) as Dictionary).duplicate(true),
 		"philosophy": str(profile.get("philosophy", GameConfig.PHILOSOPHY_NEUTRAL)),
-		"armor_skin": str(cos.get("equipped_armor", "default_iron")),
-		"dragon_skin": str(cos.get("equipped_dragon", "crimson_wyrm")),
-		"trail_id": str(cos.get("equipped_trail", "none")),
+		"armor_skin": str(cosmetics_data.get("equipped_armor", "default_iron")),
+		"dragon_skin": str(cosmetics_data.get("equipped_dragon", "crimson_wyrm")),
+		"trail_id": str(cosmetics_data.get("equipped_trail", "none")),
 		"position": [pos.x, pos.y, pos.z],
 		"yaw": 0.0,
 		"max_hp": 120.0,
@@ -393,6 +394,7 @@ func _pack_public_state(st: Dictionary) -> Dictionary:
 		"disguised_novice": st.get("disguised_novice", false),
 		"class_id": st.get("class_id", "ARCANE_KNIGHT"),
 		"race_id": st.get("race_id", "HUMAN_VALLEY"),
+		"appearance": st.get("appearance", {}),
 		"philosophy": st.get("philosophy", GameConfig.PHILOSOPHY_NEUTRAL),
 		"armor_skin": st.get("armor_skin", "default_iron"),
 		"dragon_skin": st.get("dragon_skin", "crimson_wyrm"),
@@ -426,12 +428,13 @@ func server_refresh_player_cosmetics(peer_id: int) -> void:
 		return
 	var st: Dictionary = _server_states[peer_id] as Dictionary
 	var profile: Dictionary = NetworkManager.get_peer_profile(peer_id)
-	var cos: Dictionary = profile.get("cosmetics", {}) as Dictionary
-	st["armor_skin"] = str(cos.get("equipped_armor", "default_iron"))
-	st["dragon_skin"] = str(cos.get("equipped_dragon", "crimson_wyrm"))
-	st["trail_id"] = str(cos.get("equipped_trail", "none"))
+	var cosmetics_data: Dictionary = profile.get("cosmetics", {}) as Dictionary
+	st["armor_skin"] = str(cosmetics_data.get("equipped_armor", "default_iron"))
+	st["dragon_skin"] = str(cosmetics_data.get("equipped_dragon", "crimson_wyrm"))
+	st["trail_id"] = str(cosmetics_data.get("equipped_trail", "none"))
 	st["philosophy"] = str(profile.get("philosophy", GameConfig.PHILOSOPHY_NEUTRAL))
 	st["race_id"] = str(profile.get("race_id", "HUMAN_VALLEY"))
+	st["appearance"] = (profile.get("appearance", {}) as Dictionary).duplicate(true)
 	_rpc_update_player_state.rpc(peer_id, _pack_public_state(st))
 	if bool(st.get("is_mounted", false)):
 		_rpc_update_dragon_cosmetics.rpc(peer_id, str(st["dragon_skin"]), str(st["trail_id"]), bool(st.get("has_combat_grace", false)))
@@ -943,14 +946,15 @@ func _server_apply_damage_to_player(target_pid: int, attacker_pid: int, raw_dama
 	if element == "lightning":
 		tst["stun_until"] = maxf(float(tst.get("stun_until", 0.0)), now + 0.65)
 
-	if bool(tst.get("is_blocking", false)) and float(tst.get("stamina", 0.0)) >= 14.0:
+	if bool(tst.get("is_blocking", false)) and float(tst.get("stamina", 0.0)) >= 10.0:
 		var yaw: float = float(tst.get("yaw", 0.0))
 		var facing: Vector3 = Vector3(-sin(yaw), 0.0, -cos(yaw))
 		var tpos: Vector3 = server_get_player_position(target_pid)
-		var to_hit: Vector3 = Vector3(hit_world_origin.x - tpos.x, 0.0, hit_world_origin.z - tpos.z).normalized()
-		if facing.dot(to_hit) >= 0.25:
+		var delta_hit: Vector3 = Vector3(hit_world_origin.x - tpos.x, 0.0, hit_world_origin.z - tpos.z)
+		var blocked_front: bool = delta_hit.length_squared() < 0.04 or facing.dot(delta_hit.normalized()) >= -0.15
+		if blocked_front:
 			dmg *= 0.35
-			tst["stamina"] = maxf(0.0, float(tst["stamina"]) - 16.0)
+			tst["stamina"] = maxf(0.0, float(tst["stamina"]) - 14.0)
 
 	var shield: float = float(tst.get("shield_hp", 0.0))
 	if shield > 0.0:
@@ -983,13 +987,15 @@ func _server_handle_player_death(victim_pid: int, killer_pid: int) -> void:
 		var inv: Dictionary = acc["inventory"] as Dictionary
 		var dropped_items: Dictionary = inv.duplicate(true)
 		inv.clear()
-		for eq_key: String in ["equipped_weapon", "equipped_helmet", "equipped_chest", "equipped_legs", "equipped_boots"]:
+		for eq_key: String in ["equipped_weapon", "equipped_helmet", "equipped_chest", "equipped_legs", "equipped_boots", "equipped_mount"]:
 			var eq_id: String = str(acc.get(eq_key, ""))
 			if not eq_id.is_empty():
-				dropped_items[eq_id] = int(dropped_items.get(eq_id, 0)) + 1
+				if eq_key != "equipped_mount":
+					dropped_items[eq_id] = int(dropped_items.get(eq_id, 0)) + 1
 				acc[eq_key] = ""
+		acc["dragon_summoned"] = false
 		var cur_gold: int = int(acc.get("gold", 0))
-		var dropped_gold: int = cur_gold / 2
+		var dropped_gold: int = int(floorf(float(cur_gold) / 2.0))
 		acc["gold"] = cur_gold - dropped_gold
 
 		if not dropped_items.is_empty() or dropped_gold > 0:
@@ -1170,7 +1176,9 @@ func _rpc_gather_resource(resource_key: String) -> void:
 		"depleted": depleted,
 		"respawn_at": Time.get_unix_time_from_system() + 60.0 if depleted else 0.0
 	}
+	DatabaseManager.save_database()
 	_server_grant_xp_with_party(sender_id, 35)
+	NetworkManager.push_profile_to_peer(sender_id)
 	_rpc_update_resource_state.rpc(resource_key, maxi(0, new_charges), depleted)
 
 
@@ -1249,7 +1257,7 @@ func _rpc_wayshrine_teleport(wayshrine_id: String) -> void:
 	NetworkManager._rpc_receive_chat.rpc_id(sender_id, "Viaje Rápido", "Ermita", "Viajaste a %s." % str(wdef.get("name", wayshrine_id)), "#7ce8ff")
 
 
-# --- Dragon Mount Stored in 150-Slot Backpack (Requires dragon_mount_stone) ---
+# --- Dragon Mount Stored in 150-Slot Backpack (Persistent Sello de Dragón Ancestral) ---
 
 func request_toggle_dragon() -> void:
 	_rpc_toggle_dragon.rpc_id(1)
@@ -1259,31 +1267,46 @@ func request_toggle_dragon() -> void:
 func _rpc_toggle_dragon() -> void:
 	if not NetworkManager.is_server_running():
 		return
-	var sender_id: int = _get_sender_id()
-	if not _server_states.has(sender_id):
+	server_toggle_dragon_for_peer(_get_sender_id())
+
+
+func server_toggle_dragon_for_peer(sender_id: int) -> void:
+	if not NetworkManager.is_server_running() or not _server_states.has(sender_id):
 		return
 	var st: Dictionary = _server_states[sender_id] as Dictionary
 	var key: String = NetworkManager.get_peer_username_key(sender_id)
 	var acc: Dictionary = DatabaseManager.get_account_mutable(key)
+	if acc.is_empty():
+		return
 	var is_admin: bool = GameConfig.is_avatar_role(str(st.get("role", "")))
+	var inv: Dictionary = acc.get("inventory", {}) as Dictionary
+	if is_admin and int(inv.get("dragon_mount_stone", 0)) <= 0:
+		inv["dragon_mount_stone"] = 1
+		acc["inventory"] = inv
+		acc["equipped_mount"] = "dragon_mount_stone"
 	var now_mounted: bool = not bool(st.get("is_mounted", false))
 
 	if now_mounted:
-		var inv: Dictionary = acc.get("inventory", {}) as Dictionary
-		if not is_admin and int(inv.get("dragon_mount_stone", 0)) <= 0:
+		if int(inv.get("dragon_mount_stone", 0)) <= 0:
 			NetworkManager._rpc_receive_chat.rpc_id(
 				sender_id,
 				"Montura Dragón",
 				"Requisito",
-				"🐉 Necesitás una 'Piedra de Vínculo de Dragón' en tu mochila. Derrotá a los Jefes Dragón Supremos en el Valle Dracónico para obtenerla.",
+				"🐉 Necesitás el ítem 'Sello de Dragón Ancestral' en tu mochila (150 espacios). Derrotá a un Dragón Jefe de Mundo en el Valle Dracónico para obtenerlo.",
 				"#ffaa66"
 			)
 			return
 		st["is_mounted"] = true
 		st["has_dragon"] = true
+		acc["equipped_mount"] = "dragon_mount_stone"
+		acc["dragon_summoned"] = true
 		var ppos: Vector3 = server_get_player_position(sender_id)
+		acc["position"] = [ppos.x, ppos.y, ppos.z]
 		var dpos: Vector3 = ppos + Vector3(0.0, 0.2, 0.0)
 		st["dragon_pos"] = dpos
+		DatabaseManager.mark_dirty()
+		DatabaseManager.save_database()
+		NetworkManager.push_profile_to_peer(sender_id)
 		_rpc_spawn_or_update_dragon.rpc(
 			sender_id,
 			str(st.get("dragon_skin", "crimson_wyrm")),
@@ -1293,11 +1316,19 @@ func _rpc_toggle_dragon() -> void:
 			true
 		)
 	else:
-		# Dismounting automatically returns the dragon to the player's 150-slot backpack!
+		# Dismounting returns the dragon into the Sello de Dragón Ancestral inside the 150-slot backpack and saves immediately!
 		st["is_mounted"] = false
 		st["has_dragon"] = false
+		acc["dragon_summoned"] = false
+		if int(inv.get("dragon_mount_stone", 0)) > 0:
+			acc["equipped_mount"] = "dragon_mount_stone"
+		var ppos_off: Vector3 = server_get_player_position(sender_id)
+		acc["position"] = [ppos_off.x, ppos_off.y, ppos_off.z]
+		DatabaseManager.mark_dirty()
+		DatabaseManager.save_database()
+		NetworkManager.push_profile_to_peer(sender_id)
 		_rpc_despawn_dragon.rpc(sender_id)
-		NetworkManager._rpc_receive_chat.rpc_id(sender_id, "Montura Dragón", "Mochila", "Tu dragón regresó automáticamente a la Piedra de Vínculo en tu mochila.", "#8fc7ff")
+		NetworkManager._rpc_receive_chat.rpc_id(sender_id, "Montura Dragón", "Mochila", "🐉 Tu dragón regresó al Sello de Dragón Ancestral en tu mochila (guardado en server_database.json).", "#8fc7ff")
 
 
 @rpc("authority", "call_local", "reliable")
@@ -1763,13 +1794,33 @@ func _server_drop_boss_epic_loot(b: Dictionary, slayer_pid: int, slayer_name: St
 		"dungeon_essence": 3 if bool(b["is_dungeon"]) else 2,
 		"raw_meat": 4
 	}
+	var granted_to_bag: bool = false
 	if is_sup:
-		epic_items["dragon_mount_stone"] = 1
+		if slayer_pid > 0:
+			var slayer_key: String = NetworkManager.get_peer_username_key(slayer_pid)
+			if not slayer_key.is_empty() and DatabaseManager.add_item(slayer_key, "dragon_mount_stone", 1):
+				var slayer_acc: Dictionary = DatabaseManager.get_account_mutable(slayer_key)
+				if not slayer_acc.is_empty():
+					slayer_acc["equipped_mount"] = "dragon_mount_stone"
+				DatabaseManager.save_database()
+				NetworkManager.push_profile_to_peer(slayer_pid)
+				granted_to_bag = true
+				NetworkManager._rpc_receive_chat.rpc_id(
+					slayer_pid,
+					"Montura Dragón",
+					"Recompensa",
+					"🐉 ¡Recibiste 'Sello de Dragón Ancestral' en tu mochila! Pulsá G o X para invocar tu Dragón (guardado en server_database.json).",
+					"#ffe066"
+				)
+		if not granted_to_bag:
+			epic_items["dragon_mount_stone"] = 1
 	var gold: int = int(b.get("gold_reward", 350))
 	server_spawn_world_loot_bag("Tesoro de %s" % str(b["name"]), drop_pos, gold, epic_items)
 	if slayer_pid > 0:
 		_server_grant_xp_with_party(slayer_pid, int(b.get("xp_reward", 2400)))
-	var extra_msg: String = " ¡INCLUYE PIEDRA DE VÍNCULO DE DRAGÓN!" if is_sup else ""
+	var extra_msg: String = ""
+	if is_sup:
+		extra_msg = " ¡%s obtuvo el Sello de Dragón Ancestral en su mochila!" % slayer_name if granted_to_bag else " ¡INCLUYE SELLO DE DRAGÓN ANCESTRAL EN EL COFRE!"
 	NetworkManager.broadcast_banner(
 		"🐉 ¡JEFE DERROTADO: %s!" % str(b["name"]),
 		"%s dio el golpe final. Cofre mítico en (%d, %d) con %d oro.%s" % [slayer_name, int(drop_pos.x), int(drop_pos.z), gold, extra_msg],

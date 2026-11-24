@@ -153,6 +153,7 @@ func _build_ui() -> void:
 	_hide_helm_cb.text = "Ocultar yelmo / mostrar rostro"
 	_hide_helm_cb.toggled.connect(func(pressed: bool) -> void:
 		appearance["hide_helmet"] = pressed
+		_rebuild_3d_preview()
 		_emit_selection()
 	)
 	ctrl.add_child(_hide_helm_cb)

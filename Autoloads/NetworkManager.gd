@@ -273,16 +273,16 @@ func _server_process_auth(
 		return res
 
 	var acc: Dictionary = DatabaseManager.get_account_mutable(key)
-	var cos: Dictionary = acc["cosmetics"] as Dictionary
+	var cosmetics_data: Dictionary = acc["cosmetics"] as Dictionary
 	var chosen_armor: String = str(cosmetics_choice.get("equipped_armor", ""))
-	if (cos["owned_armors"] as Array).has(chosen_armor):
-		cos["equipped_armor"] = chosen_armor
+	if (cosmetics_data["owned_armors"] as Array).has(chosen_armor):
+		cosmetics_data["equipped_armor"] = chosen_armor
 	var chosen_dragon: String = str(cosmetics_choice.get("equipped_dragon", ""))
-	if (cos["owned_dragons"] as Array).has(chosen_dragon):
-		cos["equipped_dragon"] = chosen_dragon
+	if (cosmetics_data["owned_dragons"] as Array).has(chosen_dragon):
+		cosmetics_data["equipped_dragon"] = chosen_dragon
 	var chosen_trail: String = str(cosmetics_choice.get("equipped_trail", ""))
-	if (cos["owned_trails"] as Array).has(chosen_trail):
-		cos["equipped_trail"] = chosen_trail
+	if (cosmetics_data["owned_trails"] as Array).has(chosen_trail):
+		cosmetics_data["equipped_trail"] = chosen_trail
 
 	peer_to_username[peer_id] = key
 	username_to_peer[key] = peer_id
@@ -534,8 +534,8 @@ func _rpc_cosmetic_action(category: String, item_id: String, action: String) -> 
 
 	if not catalog.has(item_id):
 		return
-	var cos: Dictionary = acc["cosmetics"] as Dictionary
-	var owned: Array = cos[owned_key] as Array
+	var cosmetics_data: Dictionary = acc["cosmetics"] as Dictionary
+	var owned: Array = cosmetics_data[owned_key] as Array
 	var item_def: Dictionary = catalog[item_id] as Dictionary
 
 	if action == "buy":
@@ -547,12 +547,12 @@ func _rpc_cosmetic_action(category: String, item_id: String, action: String) -> 
 				return
 			acc["crowns"] = crowns - price
 			owned.append(item_id)
-		cos[equip_key] = item_id
+		cosmetics_data[equip_key] = item_id
 	elif action == "equip":
 		if owned.has(item_id) or is_admin:
 			if not owned.has(item_id):
 				owned.append(item_id)
-			cos[equip_key] = item_id
+			cosmetics_data[equip_key] = item_id
 
 	DatabaseManager.mark_dirty()
 	DatabaseManager.save_database()
@@ -581,7 +581,7 @@ func _rpc_craft_item(recipe_id: String) -> void:
 		_rpc_receive_chat.rpc_id(sender_id, "Forja", "Sistema", str(res.get("error", "No se pudo fabricar.")), "#ffaa66")
 		return
 	push_profile_to_peer(sender_id)
-	_rpc_receive_chat.rpc_id(sender_id, "Forja", "Sistema", "Fabricaste: %s" % str(res.get("item_name", recipe_id)), "#88f2a2")
+	_rpc_receive_chat.rpc_id(sender_id, "Forja", "Sistema", str(res.get("message", "Fabricado: %s" % recipe_id)), "#88f2a2")
 
 
 func request_equip_or_use_item(item_id: String) -> void:
@@ -605,18 +605,38 @@ func _rpc_use_item(item_id: String) -> void:
 	if item_type == "weapon":
 		acc["equipped_weapon"] = item_id
 		DatabaseManager.mark_dirty()
+		DatabaseManager.save_database()
 		push_profile_to_peer(sender_id)
+		_rpc_receive_chat.rpc_id(sender_id, "Equipo", "Mochila", "Equipaste %s (guardado en servidor)." % str(item_def.get("name", item_id)), "#88f2a2")
+	elif item_type == "helmet" or item_type == "chest" or item_type == "legs" or item_type == "boots":
+		var field: String = "equipped_%s" % item_type
+		acc[field] = item_id
+		DatabaseManager.mark_dirty()
+		DatabaseManager.save_database()
+		push_profile_to_peer(sender_id)
+		_rpc_receive_chat.rpc_id(sender_id, "Equipo", "Mochila", "Equipaste %s (guardado en servidor)." % str(item_def.get("name", item_id)), "#88f2a2")
 	elif item_type == "armor":
 		var slot_name: String = str(item_def.get("slot", "chest"))
 		var field: String = "equipped_%s" % slot_name
 		acc[field] = item_id
 		DatabaseManager.mark_dirty()
+		DatabaseManager.save_database()
 		push_profile_to_peer(sender_id)
+	elif item_type == "mount":
+		acc["equipped_mount"] = item_id
+		DatabaseManager.mark_dirty()
+		DatabaseManager.save_database()
+		var wa_m: Node = get_tree().get_first_node_in_group("world_authority")
+		if wa_m != null and wa_m.has_method("server_toggle_dragon_for_peer"):
+			wa_m.call("server_toggle_dragon_for_peer", sender_id)
+		push_profile_to_peer(sender_id)
+		return
 	elif item_type == "consumable" or item_type == "food":
 		var world_auth: Node = get_tree().get_first_node_in_group("world_authority")
 		if world_auth != null and world_auth.has_method("server_consume_item"):
 			if bool(world_auth.call("server_consume_item", sender_id, item_id)):
 				DatabaseManager.remove_item(key, item_id, 1)
+				DatabaseManager.save_database()
 				push_profile_to_peer(sender_id)
 	var wa: Node = get_tree().get_first_node_in_group("world_authority")
 	if wa != null and wa.has_method("server_recalculate_player_stats"):

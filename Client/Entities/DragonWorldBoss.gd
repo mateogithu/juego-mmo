@@ -28,4 +28,4 @@ func _update_label() -> void:
 	if label_3d == null:
 		return
 	label_3d.modulate = Color(1.0, 0.55, 0.2)
-	label_3d.text = "🐉 JEFE SUPREMO: %s 🐉\nHP: %d / %d (Suelta Montura de Dragón)" % [boss_name, int(ceilf(hp)), int(max_hp)]
+	label_3d.text = "🐉 JEFE SUPREMO: %s 🐉\nHP: %d / %d (Otorga Sello de Dragón Ancestral)" % [boss_name, int(ceilf(hp)), int(max_hp)]

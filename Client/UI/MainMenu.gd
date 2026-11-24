@@ -275,8 +275,8 @@ func _on_dedicated_pressed() -> void:
 
 func _on_lore_pressed() -> void:
 	AudioSynth.play_ui_click()
-	IntroLore.enter_world_after = false
-	get_tree().change_scene_to_file("res://Client/UI/IntroLore.tscn")
+	IntroCinematic.enter_world_after = false
+	get_tree().change_scene_to_file("res://Client/UI/IntroCinematic.tscn")
 
 
 func _on_status_changed(text: String) -> void:
@@ -291,7 +291,7 @@ func _on_auth_succeeded(profile: Dictionary, is_new: bool) -> void:
 	var uname: String = str(profile.get("username", ""))
 	if is_new and not DatabaseManager.has_seen_intro(uname):
 		DatabaseManager.mark_intro_seen(uname)
-		IntroLore.enter_world_after = true
-		get_tree().change_scene_to_file("res://Client/UI/IntroLore.tscn")
+		IntroCinematic.enter_world_after = true
+		get_tree().change_scene_to_file("res://Client/UI/IntroCinematic.tscn")
 	else:
 		get_tree().change_scene_to_file("res://Client/World/World.tscn")
